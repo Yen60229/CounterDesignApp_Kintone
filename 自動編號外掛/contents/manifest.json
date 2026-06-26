@@ -1,0 +1,36 @@
+{
+  "manifest_version": 1,
+  "version": "1.0.0",
+  "type": "APP",
+  "name": {
+    "ja": "自動採番プラグイン（SYS-07-2）",
+    "en": "Serial Number Generator (SYS-07-2)",
+    "zh": "自动流水号产生器（SYS-07-2）",
+    "zh-TW": "流水號自動產生器（SYS-07-2）"
+  },
+  "description": {
+    "ja": "保存・フロー進行時に SYS-07-2_採番カウンター App から自動採番し、指定欄位に書き戻します。",
+    "en": "Automatically issues a serial number from the SYS-07-2 Counter App on save or process proceed, and writes it back to the target field.",
+    "zh": "储存或流程推进时，从 SYS-07-2_编号计数器 App 自动取号并回写到指定字段。",
+    "zh-TW": "儲存或流程推進時，自動從 SYS-07-2_編號計數器 App 取號並寫入指定欄位。"
+  },
+  "homepage_url": {
+    "ja": "https://nipponexpress-taiwan.cybozu.com/k/715/",
+    "en": "https://nipponexpress-taiwan.cybozu.com/k/715/",
+    "zh": "https://nipponexpress-taiwan.cybozu.com/k/715/",
+    "zh-TW": "https://nipponexpress-taiwan.cybozu.com/k/715/"
+  },
+  "icon": "source/image/icon.png",
+  "desktop": {
+    "js": ["dist/desktop.js"]
+  },
+  "mobile": {
+    "js": ["dist/mobile.js"]
+  },
+  "config": {
+    "html": "source/html/config.html",
+    "js": ["3rd_parties/kintone-config-helper.js", "dist/config.js"],
+    "css": ["source/css/config.css"],
+    "required_params": []
+  }
+}

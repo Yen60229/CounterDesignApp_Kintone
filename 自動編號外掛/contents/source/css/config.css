@@ -1,0 +1,149 @@
+/* Auto-Numbering Plugin - Config UI
+   設計語言同 status-driven-actions-plugin：大量中性灰白 + 單一藍色重點色，字級放大、層次清楚。 */
+
+:root {
+  --anum-accent: #2b6cb0;
+  --anum-accent-dark: #245a91;
+  --anum-accent-soft: #eaf1fa;
+  --anum-text: #1f2933;
+  --anum-text-2: #52606d;
+  --anum-label: #3e4c59;
+  --anum-help: #6b7480;
+  --anum-border: #e1e5ea;
+  --anum-border-2: #cbd2d9;
+  --anum-bg-soft: #f6f8fa;
+  --anum-danger: #c0392b;
+  --anum-warn: #b9770e;
+  --anum-radius: 8px;
+}
+
+#ui-section {
+  font-family: -apple-system, "Segoe UI", "Helvetica Neue", "Microsoft JhengHei", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--anum-text);
+  padding: 20px;
+  max-width: 860px;
+}
+
+.anum-loading { color: var(--anum-help); padding: 48px; text-align: center; font-size: 15px; }
+
+/* ── 工具列（置頂 sticky）── */
+.anum-toolbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(255,255,255,.96); backdrop-filter: blur(4px);
+  padding: 12px 4px; margin-bottom: 18px;
+  border-bottom: 1px solid var(--anum-border);
+}
+.anum-toolbar .anum-btn { margin-left: 0; }
+
+/* ── 區塊 ── */
+.anum-section {
+  margin-bottom: 24px;
+  padding: 20px 22px;
+  background: #fff;
+  border: 1px solid var(--anum-border);
+  border-radius: var(--anum-radius);
+  box-shadow: 0 1px 2px rgba(16,24,40,.04);
+}
+.anum-section-title {
+  font-size: 17px; font-weight: 700;
+  margin: 0 0 14px;
+  padding-left: 12px;
+  color: var(--anum-text);
+  border-left: 4px solid var(--anum-accent);
+  line-height: 1.3;
+}
+.anum-section-help { font-size: 13px; color: var(--anum-help); margin: 0 0 14px; }
+.anum-section-help.warn { color: var(--anum-warn); }
+
+/* ── 格線（label + control）── */
+.anum-grid { display: grid; grid-template-columns: 160px 1fr; gap: 10px 16px; align-items: center; }
+.anum-grid .anum-label, .anum-label { color: var(--anum-label); font-size: 13px; font-weight: 600; }
+.anum-grid .anum-ss-wrap,
+.anum-grid select,
+.anum-grid input[type=text],
+.anum-grid input[type=number] { min-width: 0; width: 100%; box-sizing: border-box; }
+
+/* ── 通用輸入框 ── */
+.anum-grid select,
+.anum-grid input[type=text],
+.anum-grid input[type=number] {
+  padding: 7px 9px; font-size: 13.5px;
+  border: 1px solid var(--anum-border-2); border-radius: 5px;
+  background: #fff; color: var(--anum-text);
+}
+.anum-grid select:focus,
+.anum-grid input:focus {
+  outline: none; border-color: var(--anum-accent);
+  box-shadow: 0 0 0 3px rgba(43,108,176,.15);
+}
+
+/* ── 分類規則表格 ── */
+.anum-table { width: 100%; border-collapse: collapse; background: #fff; }
+.anum-table th,
+.anum-table td { border: 1px solid var(--anum-border); padding: 8px 10px; font-size: 13.5px; vertical-align: middle; }
+.anum-table th { background: var(--anum-bg-soft); font-weight: 600; text-align: left; color: var(--anum-label); }
+.anum-table input[type=text],
+.anum-table input[type=number],
+.anum-table select {
+  width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 13.5px;
+  border: 1px solid var(--anum-border-2); border-radius: 5px;
+}
+.anum-table input:focus,
+.anum-table select:focus {
+  outline: none; border-color: var(--anum-accent);
+  box-shadow: 0 0 0 3px rgba(43,108,176,.15);
+}
+
+/* ── 複選框群 ── */
+.anum-checks { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 12px; }
+#ui-section input[type=checkbox] { width: 16px; height: 16px; vertical-align: middle; accent-color: var(--anum-accent); }
+
+/* ── 按鈕 ── */
+.anum-btn {
+  padding: 7px 16px; font-size: 13.5px; font-weight: 500;
+  border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--anum-border-2); background: #fff; color: var(--anum-text);
+  transition: background .12s, border-color .12s, box-shadow .12s;
+}
+.anum-btn:hover { background: var(--anum-bg-soft); border-color: #b6bfc9; }
+.anum-btn:active { background: #eef1f4; }
+.anum-btn-primary { background: var(--anum-accent); color: #fff; border-color: var(--anum-accent); }
+.anum-btn-primary:hover { background: var(--anum-accent-dark); border-color: var(--anum-accent-dark); }
+.anum-btn-add { margin-top: 10px; }
+.anum-btn-row {
+  color: var(--anum-danger); padding: 4px 10px;
+  border: 1px solid transparent; background: transparent; cursor: pointer;
+  border-radius: 6px; font-size: 13px;
+}
+.anum-btn-row:hover { background: #fbeceb; border-color: #f0c8c4; }
+
+/* ── 訊息 ── */
+.anum-error { color: var(--anum-danger); font-size: 13px; }
+
+/* ── 可搜尋下拉 ── */
+.anum-ss-wrap { position: relative; }
+.anum-ss-input {
+  width: 100%; box-sizing: border-box;
+  padding: 7px 26px 7px 9px; font-size: 13.5px; color: var(--anum-text);
+  border: 1px solid var(--anum-border-2); border-radius: 5px;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23999'/%3E%3C/svg%3E") no-repeat right 9px center;
+  cursor: pointer;
+}
+.anum-ss-input:focus { outline: none; border-color: var(--anum-accent); box-shadow: 0 0 0 3px rgba(43,108,176,.15); cursor: text; }
+.anum-ss-list {
+  display: none;
+  position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 9999;
+  max-height: 260px; overflow-y: auto;
+  background: #fff; border: 1px solid var(--anum-border-2); border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(16,24,40,.14);
+}
+.anum-ss-item {
+  padding: 8px 12px; font-size: 13.5px; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--anum-text);
+}
+.anum-ss-item:hover { background: var(--anum-accent-soft); }
+.anum-ss-item.anum-ss-active { font-weight: 700; }
+.anum-ss-empty { padding: 10px 12px; font-size: 13px; color: var(--anum-help); }
