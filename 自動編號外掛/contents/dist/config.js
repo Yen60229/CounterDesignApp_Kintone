@@ -55,7 +55,7 @@
   };
 
   const select = (options, value, onChange, attrs = {}) => {
-    // 用 searchableSelect 取代標準 select，所有下拉都可搜尋
+    // 以 searchableSelect 取代標準 select，使所有下拉選單皆可搜尋
     return searchableSelect(options, value, onChange);
   };
 
