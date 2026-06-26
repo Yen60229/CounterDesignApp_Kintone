@@ -1,0 +1,9 @@
+﻿# plugin private key - NEVER commit
+*.ppk
+
+# build outputs
+plugin*.zip
+plugin.zip
+
+# Claude Code session
+.claude/
