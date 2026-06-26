@@ -1,7 +1,13 @@
 const CONFIG = { COUNTER_APP: 100, MAX_RETRY: 5 };
 
-// 依重置週期計算「當前週期標記」
-// NONE → 空字串；YEARLY → 2026；MONTHLY → 202606；DAILY → 20260625
+/**
+ * 依重置週期設定，計算當前週期標記字串。
+ * 週期對應格式如下：
+ *   NONE    → 空字串（永久累加，不執行歸零）
+ *   YEARLY  → 年份四碼，例如 2026
+ *   MONTHLY → 年月六碼，例如 202606
+ *   DAILY   → 年月日八碼，例如 20260625
+ */
 const getPeriodTag = (cycle) => {
   const now = new Date();
   const y = now.getFullYear();
@@ -15,19 +21,29 @@ const getPeriodTag = (cycle) => {
     case 'DAILY':
       return `${y}${m}${d}`;
     default:
-      return ''; // NONE：永久累加，不歸零
+      return '';
   }
 };
 
-// 編號樣式樣板：把 token 套進 Counter App 的「編號樣式」(number_format) 欄位
-// 後台人員只要改 Counter App 該筆記錄的 number_format / pad，就能換樣式，免改程式。
-// 支援 token：
-//   {prefix}   → 前綴欄位（prefix）
-//   {seq}      → 流水號，補零到 pad 位（pad=6 → 000001）
-//   {seq:N}    → 流水號，補零到 N 位（覆寫 pad，例 {seq:3} → 001）
-//   {period}   → 目前週期標記（period_tag，如 2026 / 202606）
-//   {YYYY}{YY}{MM}{DD} → 發號當下的西元年/兩碼年/月/日
-// number_format 留空 → 退回預設 {prefix}{seq}（向下相容舊資料：GO000001）
+/**
+ * 依 Counter App 中各計數器記錄的「編號樣式」欄位（number_format），
+ * 將樣板 Token 替換為實際值，組合出最終編號字串。
+ *
+ * 後台維護人員僅需修改 Counter App 中對應記錄的 number_format 與 pad 欄位，
+ * 即可變更編號格式，無須調整程式碼。
+ *
+ * 支援的 Token 說明：
+ *   {prefix}       → 前綴欄位（prefix）內容
+ *   {seq}          → 流水號，依 pad 位數補零（pad=6 時，1 → 000001）
+ *   {seq:N}        → 流水號，補零至指定 N 位（覆寫 pad 設定，例如 {seq:3} → 001）
+ *   {period}       → 當前週期標記（period_tag，例如 2026 或 202606）
+ *   {YYYY}         → 發號當下西元年（四碼）
+ *   {YY}           → 發號當下西元年（後兩碼）
+ *   {MM}           → 發號當下月份（補零兩碼）
+ *   {DD}           → 發號當下日期（補零兩碼）
+ *
+ * number_format 留空時，預設使用 {prefix}{seq}，輸出結果與舊版相同（例如 GO000001）。
+ */
 const buildSerial = (template, { prefix, seq, pad, period }) => {
   const now = new Date();
   const yyyy = String(now.getFullYear());
@@ -43,9 +59,13 @@ const buildSerial = (template, { prefix, seq, pad, period }) => {
     .replace(/\{DD\}/g, String(now.getDate()).padStart(2, '0'));
 };
 
-// 通用發號引擎：呼叫端只傳 category_key，app_id 自動帶入
+/**
+ * 通用發號引擎。
+ * 呼叫端僅需傳入 category_key，所屬 App ID 由 kintone.app.getId() 自動取得，
+ * 因此同一份程式碼可直接部署於多個業務 App，無需個別修改。
+ */
 const issueSerial = async (categoryKey) => {
-  const appId = kintone.app.getId(); // 自動取得當前業務 App ID
+  const appId = kintone.app.getId();
 
   for (let attempt = 0; attempt < CONFIG.MAX_RETRY; attempt++) {
     const res = await kintone.api(kintone.api.url('/k/v1/records', true), 'GET', {
@@ -53,67 +73,72 @@ const issueSerial = async (categoryKey) => {
       query: `source_app_id = "${appId}" and category_key = "${categoryKey}" and active in ("啟用") limit 1`,
     });
     if (res.records.length === 0) {
-      throw new Error(`找不到發號機：App ${appId} / ${categoryKey}`);
+      throw new Error(`找不到對應的發號機設定：App ${appId} / ${categoryKey}`);
     }
 
     const r = res.records[0];
 
-    // ── 週期歸零判斷 ──
-    const cycle = r.reset_cycle.value; // NONE / YEARLY / MONTHLY / DAILY
-    const nowTag = getPeriodTag(cycle); // 當前週期標記
-    const lastTag = r.period_tag.value; // 記錄裡存的上次週期標記
-    // 跨週期（標記不同）→ 從 1 重新算；同週期 → current + 1
+    // 判斷是否跨越週期，決定下一個流水號的起始值
+    const cycle = r.reset_cycle.value;
+    const nowTag = getPeriodTag(cycle);
+    const lastTag = r.period_tag.value;
+    // 週期標記不同（已跨入新週期）→ 流水號從 1 重新起算；標記相同 → current + 1 繼續累加
     const next = nowTag !== lastTag ? 1 : Number(r.current.value) + 1;
 
     try {
       await kintone.api(kintone.api.url('/k/v1/record', true), 'PUT', {
         app: CONFIG.COUNTER_APP,
         id: r.$id.value,
-        revision: r.$revision.value, // 樂觀鎖：revision 不符會被擋下
+        revision: r.$revision.value, // 樂觀鎖：revision 不符時請求將被拒絕，觸發重試
         record: {
           current: { value: String(next) },
-          period_tag: { value: nowTag }, // 同步更新週期標記
+          period_tag: { value: nowTag },
           last_issued_at: { value: new Date().toISOString() },
         },
       });
-      // 依 Counter App 該筆的「編號樣式」組出最終編號（樣式由後台維護，免改程式）
+      // 依該計數器記錄的「編號樣式」欄位組合最終編號（樣式由後台設定維護，無需修改程式）
       return buildSerial(r.number_format ? r.number_format.value : '', {
         prefix: r.prefix ? r.prefix.value : '',
         seq: next,
         pad: r.pad.value,
         period: nowTag,
-      }); // 預設 {prefix}{seq} → GO000001；改成 {prefix}-{seq:3} → GO-001
+      });
     } catch (e) {
-      if (e.code === 'GAIA_CO02') continue; // revision 衝突 → 重試
+      if (e.code === 'GAIA_CO02') continue; // revision 衝突，重新嘗試取號
       throw e;
     }
   }
-  throw new Error(`發號失敗，併發重試 ${CONFIG.MAX_RETRY} 次仍失敗：App ${appId} / ${categoryKey}`);
+  throw new Error(`發號作業失敗，於 ${CONFIG.MAX_RETRY} 次重試後仍無法完成：App ${appId} / ${categoryKey}`);
 };
 
-// 依分類決定最終編號（國內抄統編、境外/NX 才發號）
+/**
+ * 依供應商分類決定編號來源：
+ *   國內供應商 → 直接沿用統一編號（稅籍號碼），不經計數器發號
+ *   境外供應商 → 由計數器發號（類別代碼：OVERSEAS）
+ *   NX 集團供應商 → 由計數器發號（類別代碼：NX）
+ */
 const resolveSerial = async (record) => {
   const category = record['供應商分類'].value;
 
   if (category === '國內供應商') {
     const taxId = record['統一編號'].value;
-    if (!/^\d{8}$/.test(taxId)) throw new Error('國內供應商統編須為 8 碼數字');
-    return taxId; // 抄統編，不發號
+    if (!/^\d{8}$/.test(taxId)) throw new Error('國內供應商統一編號須為 8 碼數字');
+    return taxId;
   }
-  if (category === '境外供應商') return await issueSerial('境外供應商');
-  if (category === 'NX集團供應商') return await issueSerial('NX集團供應商');
+  if (category === '境外供應商') return await issueSerial('OVERSEAS');
+  if (category === 'NX集團供應商') return await issueSerial('NX');
 
   throw new Error(`未定義的供應商分類：${category}`);
 };
 
-// 在特定狀態下、儲存成功後觸發發號並回寫
+// 於記錄儲存成功後觸發發號，並將結果回寫至供應商編號欄位
 kintone.events.on(['app.record.create.submit.success', 'app.record.edit.submit.success'], async (event) => {
   const record = event.record;
 
-  // （選用）僅在特定狀態才發號，例如審核通過：
+  // （選用）可限制僅於特定流程狀態下觸發發號，例如：
   // if (record['狀態'].value !== '審核通過') return event;
 
-  if (record['供應商編號'].value) return event; // 已有編號不重發
+  if (record['供應商編號'].value) return event; // 已存在編號者，不重複發號
 
   try {
     const serial = await resolveSerial(record);
