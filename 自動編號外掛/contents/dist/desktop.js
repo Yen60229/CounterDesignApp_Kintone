@@ -280,9 +280,9 @@
         app: appId, id: recordId, record: { [NUMBER_FIELD]: { value: serial } },
       }, appId);
       await uiToast('success', '編號已產生', `${NUMBER_FIELD}：${serial}`);
-      // 清除 kintone「未儲存變更」beforeunload 守衛，避免導向詳細頁時跳出原生離開警告
-      try { window.onbeforeunload = null; } catch (e) {}
-      window.location.href = `${location.origin}/k/${appId}/show#record=${recordId}`;
+      // 不手動導頁：序號已寫入 DB（上面已 await），kintone 在 submit.success 後會自行
+      // 由編輯表單轉到詳細頁並重新讀取記錄，屆時即顯示新編號。手動導頁反而會觸發
+      // 「未儲存變更」原生警告，或停在 hash 路由不重抓資料（需手動重整）。
     } catch (e) {
       console.error('[anum] 發號/回寫失敗', e);
       await uiToast('error', '編號產生失敗', friendlyError(e, '自動編號'));
