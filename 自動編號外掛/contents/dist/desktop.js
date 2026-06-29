@@ -280,8 +280,7 @@
         app: appId, id: recordId, record: { [NUMBER_FIELD]: { value: serial } },
       }, appId);
       await uiToast('success', '編號已產生', `${NUMBER_FIELD}：${serial}`);
-      // 轉向詳細頁自動顯示新編號
-      window.location.href = `/k/${appId}/show#record=${recordId}`;
+      window.location.reload();
     } catch (e) {
       console.error('[anum] 發號/回寫失敗', e);
       await uiToast('error', '編號產生失敗', friendlyError(e, '自動編號'));
