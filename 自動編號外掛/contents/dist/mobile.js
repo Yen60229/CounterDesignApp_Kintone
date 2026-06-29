@@ -38,8 +38,10 @@
   const MOBILE_NS = (() => { try { return kintone.mobile && kintone.mobile.app; } catch (e) { return null; } })();
 
   const getAppId = () => {
-    if (APP_NS && APP_NS.getId) return String(APP_NS.getId());
-    if (MOBILE_NS && MOBILE_NS.getId) return String(MOBILE_NS.getId());
+    const desktopId = APP_NS && APP_NS.getId && APP_NS.getId();
+    if (desktopId != null) return String(desktopId);
+    const mobileId = MOBILE_NS && MOBILE_NS.getId && MOBILE_NS.getId();
+    if (mobileId != null) return String(mobileId);
     return '';
   };
 
