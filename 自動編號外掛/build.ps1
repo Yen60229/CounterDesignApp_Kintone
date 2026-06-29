@@ -1,4 +1,4 @@
-﻿# build.ps1 - Auto-Numbering Plugin (SYS-07-2)
+# build.ps1 - Auto-Numbering Plugin (SYS-07-2)
 # Usage:
 #   .\build.ps1            - sync mobile.js + pack (version unchanged)
 #   .\build.ps1 1.2.0      - sync + bump version to 1.2.0 + pack
@@ -8,12 +8,13 @@ param([string]$Version = '')
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+
 Write-Host ""
 Write-Host "=== Auto-Numbering Plugin (SYS-07-2) Build ===" -ForegroundColor Cyan
 
-# helper: extract version from manifest.json via regex (avoids ConvertFrom-Json encoding issues)
 function Get-ManifestVersion {
-    $raw = Get-Content "$PSScriptRoot\contents\manifest.json" -Raw -Encoding utf8
+    $raw = [System.IO.File]::ReadAllText("$PSScriptRoot\contents\manifest.json", [System.Text.Encoding]::UTF8)
     if ($raw -match '"version":\s*"([^"]+)"') { return $Matches[1] }
     return '0.0.0'
 }
@@ -28,13 +29,13 @@ if ($Version) {
         Write-Error "Version format must be x.y.z (e.g. 1.2.0)"; exit 1
     }
 
-    $manifest = Get-Content contents\manifest.json -Raw -Encoding utf8
+    $manifest = [System.IO.File]::ReadAllText("$PSScriptRoot\contents\manifest.json", [System.Text.Encoding]::UTF8)
     $manifest = $manifest -replace '"version":\s*"[^"]+"', ('"version": "' + $Version + '"')
-    [System.IO.File]::WriteAllText("$PSScriptRoot\contents\manifest.json", $manifest, [System.Text.Encoding]::UTF8)
+    [System.IO.File]::WriteAllText("$PSScriptRoot\contents\manifest.json", $manifest, $utf8NoBom)
 
-    $cfg = Get-Content contents\dist\config.js -Raw -Encoding utf8
+    $cfg = [System.IO.File]::ReadAllText("$PSScriptRoot\contents\dist\config.js", [System.Text.Encoding]::UTF8)
     $cfg = $cfg -replace "const UI_VERSION = '[^']+'", ("const UI_VERSION = '" + $Version + "'")
-    [System.IO.File]::WriteAllText("$PSScriptRoot\contents\dist\config.js", $cfg, [System.Text.Encoding]::UTF8)
+    [System.IO.File]::WriteAllText("$PSScriptRoot\contents\dist\config.js", $cfg, $utf8NoBom)
 
     Copy-Item contents\dist\desktop.js contents\dist\mobile.js -Force
 
