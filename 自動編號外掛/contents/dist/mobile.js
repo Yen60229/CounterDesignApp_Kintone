@@ -280,6 +280,8 @@
         app: appId, id: recordId, record: { [NUMBER_FIELD]: { value: serial } },
       }, appId);
       await uiToast('success', '編號已產生', `${NUMBER_FIELD}：${serial}`);
+      // 清除 kintone「未儲存變更」beforeunload 守衛，避免導向詳細頁時跳出原生離開警告
+      try { window.onbeforeunload = null; } catch (e) {}
       window.location.href = `${location.origin}/k/${appId}/show#record=${recordId}`;
     } catch (e) {
       console.error('[anum] 發號/回寫失敗', e);
