@@ -7,3 +7,5 @@ plugin.zip
 
 # Claude Code session
 .claude/
+# 開發用預覽產物
+config-ui-preview.inlined.html

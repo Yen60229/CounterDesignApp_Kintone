@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>自動編號外掛 — 設定畫面預覽</title>
+<!-- 開發用預覽：模擬 kintone 環境，直接以瀏覽器開啟即可檢視設定畫面外觀與互動。
+     引用的是真正的 contents/ 內檔案，所以看到的畫面＝實際外掛畫面。 -->
+<link rel="stylesheet" href="contents/source/css/config.css">
+<style>
+  .preview-banner {
+    background: #1a2430; color: #e8eef4; text-align: center;
+    padding: 8px 16px; font-size: 12.5px; letter-spacing: .03em;
+    font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  }
+  .preview-banner b { color: #7fb2e5; }
+</style>
+</head>
+<body>
+<div class="preview-banner">預覽模式：這是設定畫面的外觀模擬，<b>按「儲存設定」不會真的寫入 kintone</b>（內容會印在 Console）。</div>
+
+<section id="ui-section">
+  <div class="anum-loading">設定畫面載入中，請稍候…</div>
+</section>
+
+<script>
+// ── 模擬 kintone 環境 ──
+const SAVED = {
+  version: '1.0', counterApp: '100',
+  counterToken: '', selfToken: '',
+  hasCounterToken: true, hasSelfToken: false,
+  numberField: '事故編號', categoryField: '事故分類',
+  activeQuery: 'active in ("啟用")',
+  triggers: ['edit.submit'],
+  statusCond: '*', toStatus: '*', actionName: '*',
+  confirmMessage: '*', maxRetry: 5,
+  categories: [
+    { match: '物損事故(貨物)',       counterKey: 'CA', mode: 'issue', copyField: '', validate: '' },
+    { match: '物損事故(設施或其他)', counterKey: 'CA', mode: 'issue', copyField: '', validate: '' },
+    { match: '搬家行李事故',         counterKey: 'HA', mode: 'issue', copyField: '', validate: '' },
+    { match: '其他事故',             counterKey: 'OA', mode: 'issue', copyField: '', validate: '' },
+    { match: '國內供應商',           counterKey: '',   mode: 'copy',  copyField: '統一編號', validate: 'taxId8' },
+  ],
+  codeMaps: [
+    { token: 'level', field: '事故級別', pairs: [{ from: '一般事故', to: 'G' }, { from: '重大事故', to: 'M' }] },
+  ],
+};
+
+window.kintone = {
+  $PLUGIN_ID: 'preview',
+  app: { getId: () => 123 },
+  api: { url: (p) => 'https://example.cybozu.com' + p },
+  plugin: { app: {
+    getConfig: () => ({ data: JSON.stringify(SAVED) }),
+    getProxyConfig: () => null,
+    setProxyConfig: (u, m, h, d, cb) => cb && cb(),
+    setConfig: (c, cb) => {
+      console.log('[預覽] 會存入的設定：', JSON.parse(c.data));
+      alert('（預覽模式）設定內容已印在瀏覽器 Console，未實際寫入。');
+      cb && cb();
+    },
+  } },
+};
+
+// 刻意包含「很長的欄位名稱」，用來檢查下拉選單是否會截斷文字
+window.KintoneConfigHelper = {
+  getFields: () => Promise.resolve([
+    { code: '事故編號', label: '事故編號', type: 'SINGLE_LINE_TEXT' },
+    { code: '事故分類', label: '事故分類', type: 'DROP_DOWN' },
+    { code: '事故級別', label: '事故級別', type: 'RADIO_BUTTON' },
+    { code: '統一編號', label: '統一編號', type: 'SINGLE_LINE_TEXT' },
+    { code: '設備種類', label: '設備種類', type: 'DROP_DOWN' },
+    { code: '發生地點詳細地址與周邊環境描述', label: '發生地點詳細地址與周邊環境描述', type: 'MULTI_LINE_TEXT' },
+    { code: 'accident_handling_department_name', label: '事故處理負責部門（含代理部門）', type: 'ORGANIZATION_SELECT' },
+    { code: '客戶名稱', label: '客戶名稱', type: 'SINGLE_LINE_TEXT' },
+    { code: '建立時間', label: '建立時間', type: 'CREATED_TIME' },
+  ]),
+};
+</script>
+<script src="contents/dist/config.js"></script>
+</body>
+</html>

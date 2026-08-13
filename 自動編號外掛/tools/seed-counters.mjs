@@ -1,0 +1,249 @@
+#!/usr/bin/env node
+// =========================================================================
+// Counter App 發號機批量建檔工具
+//
+// 用途：當「計數器代碼」使用 {欄位代碼} 樣板時，Counter App 需要對應數量的發號機記錄。
+//      例：MIS作業申請單的設備代號依「設備種類 × 設備需求」分組，
+//          18 種設備種類 × {新增, 修改} = 36 台計數器，手動建檔不切實際。
+//
+// 本工具直接讀取「業務 App 表單設定」取得設備種類的實際選項清單，
+// 因此不會有「程式裡寫死的清單」與「表單實際選項」漂移的問題。
+//
+// 用法：
+//   node tools/seed-counters.mjs --source-app=123 --counter-app=456           # 預覽（dry-run）
+//   node tools/seed-counters.mjs --source-app=123 --counter-app=456 --apply   # 實際建檔
+//
+// 選用參數：
+//   --field=設備種類     決定計數器台數的欄位（預設：設備種類）
+//   --modes=新增,修改    每個選項要建立的情境（預設：新增,修改）
+//   --prefix=NX          編號前綴（預設：NX）
+//   --pad=3              流水號補零位數（預設：3）
+//
+// 認證（擇一，寫在專案根目錄的 .env 或直接用環境變數）：
+//   KINTONE_BASE_URL=https://xxx.cybozu.com
+//   KINTONE_USERNAME=... / KINTONE_PASSWORD=...      ← 較簡單，一組帳密涵蓋兩個 App
+//   或
+//   KINTONE_SOURCE_TOKEN=...   ← 業務 App 的 API Token（需「檢視記錄」＋可讀表單設定）
+//   KINTONE_COUNTER_TOKEN=...  ← Counter App 的 API Token（需「新增記錄」「檢視記錄」）
+//
+// 本工具為冪等：已存在相同 (source_app_id, category_key) 的發號機會自動略過，
+// 重複執行不會建出重複的計數器，也不會覆蓋既有的 current 值。
+// =========================================================================
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// ── 極簡 .env 讀取（不引入相依套件）────────────────────────────────────
+const loadEnv = () => {
+  // 由本檔往上找 .env，最多找五層（涵蓋 外掛/ → 編號計數器/ → kintone/）
+  let dir = __dirname;
+  for (let i = 0; i < 5; i++) {
+    const file = path.join(dir, '.env');
+    if (fs.existsSync(file)) {
+      fs.readFileSync(file, 'utf8')
+        .split(/\r?\n/)
+        .forEach((line) => {
+          const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+          if (!m) return;
+          const value = m[2].trim().replace(/^["']|["']$/g, '');
+          if (process.env[m[1]] === undefined) process.env[m[1]] = value;
+        });
+      return file;
+    }
+    dir = path.dirname(dir);
+  }
+  return null;
+};
+
+// ── 參數解析 ────────────────────────────────────────────────────────────
+const parseArgs = () => {
+  const out = { apply: false };
+  process.argv.slice(2).forEach((arg) => {
+    if (arg === '--apply') { out.apply = true; return; }
+    const m = arg.match(/^--([^=]+)=(.*)$/);
+    if (m) out[m[1]] = m[2];
+  });
+  return out;
+};
+
+// ── kintone REST 呼叫 ───────────────────────────────────────────────────
+const makeClient = (baseUrl, token) => {
+  const headers = { 'Content-Type': 'application/json' };
+
+  if (token) {
+    headers['X-Cybozu-API-Token'] = token;
+  } else if (process.env.KINTONE_USERNAME && process.env.KINTONE_PASSWORD) {
+    headers['X-Cybozu-Authorization'] = Buffer.from(
+      `${process.env.KINTONE_USERNAME}:${process.env.KINTONE_PASSWORD}`
+    ).toString('base64');
+  } else {
+    throw new Error('缺少認證資訊：請設定 KINTONE_USERNAME/PASSWORD，或對應的 API Token');
+  }
+
+  return async (endpoint, method, payload) => {
+    const url = new URL(`/k/v1/${endpoint}.json`, baseUrl);
+    const init = { method, headers };
+
+    if (method === 'GET') {
+      // kintone 的 GET 參數若為陣列，須展開成 fields[0]=x&fields[1]=y，
+      // 不能整包丟 JSON 字串（會被當成一個欄位名而查不到東西）。
+      Object.entries(payload || {}).forEach(([k, v]) => {
+        if (Array.isArray(v)) v.forEach((item, i) => url.searchParams.set(`${k}[${i}]`, item));
+        else url.searchParams.set(k, v);
+      });
+    } else {
+      init.body = JSON.stringify(payload || {});
+    }
+
+    const res = await fetch(url, init);
+    const text = await res.text();
+    let body;
+    try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
+
+    if (!res.ok) {
+      throw new Error(
+        `${method} ${endpoint} 失敗 (HTTP ${res.status})：${body.message || text}` +
+          (body.errors ? `\n${JSON.stringify(body.errors, null, 2)}` : '')
+      );
+    }
+    return body;
+  };
+};
+
+// ── 主流程 ──────────────────────────────────────────────────────────────
+const main = async () => {
+  const envFile = loadEnv();
+  const args = parseArgs();
+
+  const baseUrl = process.env.KINTONE_BASE_URL;
+  const sourceApp = args['source-app'];
+  const counterApp = args['counter-app'];
+
+  if (!baseUrl) throw new Error('缺少 KINTONE_BASE_URL');
+  if (!sourceApp) throw new Error('缺少 --source-app=<業務 App ID>');
+  if (!counterApp) throw new Error('缺少 --counter-app=<Counter App ID>');
+
+  const fieldCode = args.field || '設備種類';
+  const modes = (args.modes || '新增,修改').split(',').map((s) => s.trim()).filter(Boolean);
+  const prefixBase = args.prefix || 'NX';
+  const pad = String(args.pad || '3');
+
+  const sourceApi = makeClient(baseUrl, process.env.KINTONE_SOURCE_TOKEN);
+  const counterApi = makeClient(baseUrl, process.env.KINTONE_COUNTER_TOKEN);
+
+  console.log('=== 自動編號 — Counter App 發號機批量建檔 ===');
+  if (envFile) console.log(`讀取設定檔：${envFile}`);
+  console.log(`kintone     ：${baseUrl}`);
+  console.log(`業務 App    ：${sourceApp}`);
+  console.log(`Counter App ：${counterApp}`);
+  console.log(`分組欄位    ：${fieldCode}`);
+  console.log(`情境        ：${modes.join(' / ')}`);
+  console.log('');
+
+  // ① 從業務 App 的表單設定取得該欄位的實際選項（不寫死清單，避免日後漂移）
+  const form = await sourceApi('app/form/fields', 'GET', { app: sourceApp });
+  const field = form.properties && form.properties[fieldCode];
+  if (!field) {
+    throw new Error(`業務 App ${sourceApp} 找不到欄位代碼「${fieldCode}」`);
+  }
+  if (!field.options) {
+    throw new Error(`欄位「${fieldCode}」型別為 ${field.type}，沒有選項可列舉（需為下拉/單選）`);
+  }
+
+  // 依表單設定的顯示順序排列
+  const options = Object.values(field.options)
+    .sort((a, b) => Number(a.index) - Number(b.index))
+    .map((o) => o.label);
+
+  console.log(`取得「${fieldCode}」選項 ${options.length} 個：${options.join(', ')}`);
+  console.log('');
+
+  // ② 查出 Counter App 已存在的發號機，避免重複建檔
+  const existingResp = await counterApi('records', 'GET', {
+    app: counterApp,
+    query: `source_app_id = ${sourceApp} limit 500`,
+    fields: ['category_key'],
+  });
+  const existing = new Set(
+    (existingResp.records || []).map((r) => r.category_key && r.category_key.value).filter(Boolean)
+  );
+  if (existing.size) console.log(`Counter App 已有 ${existing.size} 台發號機，將自動略過。\n`);
+
+  // ③ 組出待建立的發號機
+  //    新增 → 依年度歸零，號碼含年碼：NXN126001
+  //    修改 → 不歸零，號碼固定用 99 區段：NXN199001
+  const MODE_SPEC = {
+    新增: { format: '{prefix}{YY}{seq}', reset: 'YEARLY' },
+    修改: { format: '{prefix}99{seq}', reset: 'NONE' },
+  };
+
+  const planned = [];
+  const skipped = [];
+
+  options.forEach((option) => {
+    modes.forEach((mode) => {
+      const spec = MODE_SPEC[mode];
+      if (!spec) throw new Error(`未定義的情境「${mode}」，請在 MODE_SPEC 中補上格式與歸零週期`);
+
+      const categoryKey = `${option}${mode}`;
+      if (existing.has(categoryKey)) { skipped.push(categoryKey); return; }
+
+      planned.push({
+        source_app_id: { value: String(sourceApp) },
+        category_key: { value: categoryKey },
+        active: { value: ['啟用'] },
+        prefix: { value: `${prefixBase}${option}` },
+        pad: { value: pad },
+        number_format: { value: spec.format },
+        reset_cycle: { value: spec.reset },
+        period_tag: { value: '' },
+        // I3：current 的語意是「已發出的最大號碼」，先 +1 再使用，故必為 0
+        current: { value: '0' },
+      });
+    });
+  });
+
+  // ④ 輸出預覽
+  console.log(`待建立 ${planned.length} 台，略過 ${skipped.length} 台（已存在）`);
+  console.log('');
+  console.log('category_key'.padEnd(16) + 'prefix'.padEnd(10) + 'number_format'.padEnd(22) + 'reset');
+  console.log('-'.repeat(64));
+  planned.forEach((r) => {
+    console.log(
+      r.category_key.value.padEnd(16) +
+        r.prefix.value.padEnd(10) +
+        r.number_format.value.padEnd(22) +
+        r.reset_cycle.value
+    );
+  });
+  console.log('');
+
+  if (planned.length === 0) {
+    console.log('沒有需要建立的發號機，結束。');
+    return;
+  }
+
+  if (!args.apply) {
+    console.log('※ 這是預覽（dry-run），尚未寫入任何資料。');
+    console.log('※ 確認無誤後，加上 --apply 重新執行即可實際建檔。');
+    return;
+  }
+
+  // ⑤ 實際建檔（/k/v1/records 單次上限 100 筆）
+  for (let i = 0; i < planned.length; i += 100) {
+    const chunk = planned.slice(i, i + 100);
+    const resp = await counterApi('records', 'POST', { app: counterApp, records: chunk });
+    console.log(`已建立 ${resp.ids.length} 筆（${i + 1} ~ ${i + chunk.length}）`);
+  }
+
+  console.log('');
+  console.log('完成。請至 Counter App 確認記錄內容，並確認業務 App 的編號欄位已勾選「值的唯一性」。');
+};
+
+main().catch((err) => {
+  console.error('\n[錯誤]', err.message);
+  process.exitCode = 1;
+});

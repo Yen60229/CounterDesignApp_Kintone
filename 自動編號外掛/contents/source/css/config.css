@@ -1,149 +1,295 @@
-/* Auto-Numbering Plugin - Config UI
-   設計語言同 status-driven-actions-plugin：大量中性灰白 + 單一藍色重點色，字級放大、層次清楚。 */
+/* 自動編號外掛 — 設定畫面樣式
+   設計方向：純白底、字級放大、層次清楚，主要使用者為 35–55 歲的表單管理人員。
+   一個藍色重點色貫穿全畫面，其餘用中性灰階，避免顏色過多造成閱讀負擔。 */
 
 :root {
-  --anum-accent: #2b6cb0;
-  --anum-accent-dark: #245a91;
-  --anum-accent-soft: #eaf1fa;
-  --anum-text: #1f2933;
-  --anum-text-2: #52606d;
-  --anum-label: #3e4c59;
-  --anum-help: #6b7480;
-  --anum-border: #e1e5ea;
-  --anum-border-2: #cbd2d9;
-  --anum-bg-soft: #f6f8fa;
-  --anum-danger: #c0392b;
-  --anum-warn: #b9770e;
-  --anum-radius: 8px;
+  --anum-accent: #2563a8;
+  --anum-accent-dark: #1d4e85;
+  --anum-accent-soft: #eef4fb;
+  --anum-text: #1a2430;
+  --anum-label: #33404e;
+  --anum-help: #5d6875;
+  --anum-border: #e3e7ec;
+  --anum-border-2: #c3ccd6;
+  --anum-bg-soft: #f7f9fb;
+  --anum-danger: #b4342a;
+  --anum-warn-bg: #fdf6e7;
+  --anum-warn-border: #e8d08a;
+  --anum-warn-text: #7a5a12;
+  --anum-radius: 10px;
 }
+
+/* 底色一律純白，避免 kintone 佈景色透進來影響閱讀 */
+html, body { background: #fff; }
 
 #ui-section {
-  font-family: -apple-system, "Segoe UI", "Helvetica Neue", "Microsoft JhengHei", Arial, sans-serif;
-  font-size: 14px;
-  line-height: 1.6;
+  font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", -apple-system,
+               "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.75;
   color: var(--anum-text);
-  padding: 20px;
-  max-width: 860px;
+  background: #fff;
+  padding: 24px 24px 64px;
+  max-width: 1000px;
 }
 
-.anum-loading { color: var(--anum-help); padding: 48px; text-align: center; font-size: 15px; }
+.anum-loading { color: var(--anum-help); padding: 56px; text-align: center; font-size: 16px; }
 
-/* ── 工具列（置頂 sticky）── */
+/* ── 置頂工具列 ── */
 .anum-toolbar {
-  position: sticky; top: 0; z-index: 10;
-  display: flex; align-items: center; gap: 8px;
-  background: rgba(255,255,255,.96); backdrop-filter: blur(4px);
-  padding: 12px 4px; margin-bottom: 18px;
-  border-bottom: 1px solid var(--anum-border);
+  position: sticky; top: 0; z-index: 100;
+  display: flex; align-items: center; gap: 10px;
+  background: #fff;
+  padding: 14px 4px; margin-bottom: 22px;
+  border-bottom: 2px solid var(--anum-border);
 }
 .anum-toolbar .anum-btn { margin-left: 0; }
+.anum-ver { font-size: 12px; color: #9aa3ad; }
 
-/* ── 區塊 ── */
+/* ── 開頭導引 ── */
+.anum-intro {
+  background: var(--anum-accent-soft);
+  border: 1px solid #cfe0f2;
+  border-radius: var(--anum-radius);
+  padding: 16px 20px; margin-bottom: 24px;
+  font-size: 14.5px; color: #234; line-height: 1.8;
+}
+.anum-intro strong { color: var(--anum-accent-dark); }
+
+/* ── 區塊卡片 ── */
 .anum-section {
-  margin-bottom: 24px;
-  padding: 20px 22px;
+  margin-bottom: 22px;
+  padding: 22px 24px 24px;
   background: #fff;
   border: 1px solid var(--anum-border);
   border-radius: var(--anum-radius);
-  box-shadow: 0 1px 2px rgba(16,24,40,.04);
+  box-shadow: 0 1px 3px rgba(16,24,40,.05);
 }
 .anum-section-title {
-  font-size: 17px; font-weight: 700;
-  margin: 0 0 14px;
-  padding-left: 12px;
+  display: flex; align-items: center; gap: 10px;
+  font-size: 18px; font-weight: 700;
+  margin: 0 0 8px;
   color: var(--anum-text);
-  border-left: 4px solid var(--anum-accent);
-  line-height: 1.3;
+  line-height: 1.4;
 }
-.anum-section-help { font-size: 13px; color: var(--anum-help); margin: 0 0 14px; }
-.anum-section-help.warn { color: var(--anum-warn); }
+/* 步驟編號徽章：讓「先做哪一步」一眼可辨 */
+.anum-step {
+  flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  background: var(--anum-accent); color: #fff;
+  border-radius: 50%;
+  font-size: 15px; font-weight: 700; line-height: 1;
+}
+.anum-section-help {
+  font-size: 14px; color: var(--anum-help);
+  margin: 0 0 14px; padding-left: 38px;
+}
+.anum-section-help:last-of-type { margin-bottom: 18px; }
 
-/* ── 格線（label + control）── */
-.anum-grid { display: grid; grid-template-columns: 160px 1fr; gap: 10px 16px; align-items: center; }
-.anum-grid .anum-label, .anum-label { color: var(--anum-label); font-size: 13px; font-weight: 600; }
+/* 提醒框：用底色區隔，不靠單純的橘色字 */
+.anum-note {
+  margin: 0 0 18px 38px;
+  padding: 12px 16px;
+  background: var(--anum-warn-bg);
+  border: 1px solid var(--anum-warn-border);
+  border-radius: 8px;
+  font-size: 13.5px; color: var(--anum-warn-text); line-height: 1.75;
+}
+.anum-note ul { margin: 6px 0 0; padding-left: 20px; }
+.anum-note li { margin: 2px 0; }
+
+/* 範例區：等寬字，讓號碼樣式看得清楚 */
+.anum-eg {
+  font-family: Consolas, "Courier New", monospace;
+  background: var(--anum-bg-soft);
+  border: 1px solid var(--anum-border);
+  border-radius: 5px;
+  padding: 1px 7px; font-size: 13.5px; color: #24405c;
+}
+
+/* ── 欄位格線 ── */
+.anum-grid {
+  display: grid; grid-template-columns: 190px minmax(0, 1fr);
+  gap: 16px 18px; align-items: start;
+}
+.anum-grid .anum-label, .anum-label {
+  color: var(--anum-label); font-size: 14.5px; font-weight: 600;
+  padding-top: 9px;
+}
+.anum-field { min-width: 0; }
+.anum-hint { font-size: 13px; color: var(--anum-help); margin-top: 5px; line-height: 1.65; }
+
 .anum-grid .anum-ss-wrap,
-.anum-grid select,
+.anum-field .anum-ss-wrap,
+.anum-grid textarea,
 .anum-grid input[type=text],
-.anum-grid input[type=number] { min-width: 0; width: 100%; box-sizing: border-box; }
+.anum-grid input[type=password],
+.anum-grid input[type=number],
+.anum-field textarea,
+.anum-field input[type=text],
+.anum-field input[type=password],
+.anum-field input[type=number] { min-width: 0; width: 100%; box-sizing: border-box; }
 
-/* ── 通用輸入框 ── */
-.anum-grid select,
-.anum-grid input[type=text],
-.anum-grid input[type=number] {
-  padding: 7px 9px; font-size: 13.5px;
-  border: 1px solid var(--anum-border-2); border-radius: 5px;
+/* ── 輸入框 ── */
+#ui-section textarea,
+#ui-section input[type=text],
+#ui-section input[type=password],
+#ui-section input[type=number] {
+  padding: 9px 11px; font-size: 14.5px;
+  font-family: inherit;
+  border: 1px solid var(--anum-border-2); border-radius: 6px;
   background: #fff; color: var(--anum-text);
 }
-.anum-grid select:focus,
-.anum-grid input:focus {
+#ui-section textarea::placeholder,
+#ui-section input::placeholder { color: #9aa4af; }
+#ui-section textarea:focus,
+#ui-section input:focus {
   outline: none; border-color: var(--anum-accent);
-  box-shadow: 0 0 0 3px rgba(43,108,176,.15);
+  box-shadow: 0 0 0 3px rgba(37,99,168,.16);
 }
 
-/* ── 分類規則表格 ── */
-.anum-table { width: 100%; border-collapse: collapse; background: #fff; }
+/* ── 表格 ──
+   min-width 給欄位一個寬度下限，避免視窗變窄時欄位被擠壓、造成選項文字被截斷。
+   注意：外層刻意不加 overflow-x:auto —— 依 CSS 規範，單軸設為 auto 會讓另一軸
+   也變成 auto，那會把懸浮在表格下方的下拉選單裁掉。寧可讓頁面橫向捲動。 */
+.anum-table-wrap { min-width: 0; }
+/* table-layout:fixed 讓下面 th 指定的百分比寬度「說了算」。
+   預設的 auto 會依內容自行分配，長標題會把其他欄位擠扁，導致選項文字被截斷。 */
+.anum-table {
+  width: 100%; min-width: 880px; table-layout: fixed;
+  border-collapse: collapse; background: #fff;
+}
 .anum-table th,
-.anum-table td { border: 1px solid var(--anum-border); padding: 8px 10px; font-size: 13.5px; vertical-align: middle; }
-.anum-table th { background: var(--anum-bg-soft); font-weight: 600; text-align: left; color: var(--anum-label); }
-.anum-table input[type=text],
-.anum-table input[type=number],
-.anum-table select {
-  width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 13.5px;
-  border: 1px solid var(--anum-border-2); border-radius: 5px;
+.anum-table td {
+  border: 1px solid var(--anum-border);
+  padding: 10px 12px; font-size: 14px; vertical-align: top;
 }
-.anum-table input:focus,
-.anum-table select:focus {
-  outline: none; border-color: var(--anum-accent);
-  box-shadow: 0 0 0 3px rgba(43,108,176,.15);
+.anum-table th {
+  background: var(--anum-bg-soft); font-weight: 600;
+  text-align: left; color: var(--anum-label);
+  font-size: 13.5px;
+  /* 不可 nowrap：標題的補充說明較長，撐開後會壓縮其他欄位 */
+  white-space: normal; word-break: break-word;
+}
+.anum-table th small { display: block; font-weight: 400; color: var(--anum-help); font-size: 12px; }
+.anum-table td { vertical-align: middle; }
+/* 需與上方 #ui-section 的通用輸入框規則同權重，否則會被蓋掉 */
+#ui-section .anum-table input[type=text],
+#ui-section .anum-table input[type=password],
+#ui-section .anum-table input[type=number],
+#ui-section .anum-table textarea { padding: 8px 10px; font-size: 14px; }
+/* 對照表的多行輸入：等寬字讓「值＝代號」上下對齊好核對 */
+#ui-section .anum-table textarea {
+  font-family: Consolas, "Courier New", monospace;
+  line-height: 1.7; resize: vertical; min-height: 74px;
+}
+/* 每個儲存格統一的內容容器：不論裡面放輸入框、說明文字還是刪除鈕，
+   都佔用相同高度並垂直置中，整列才不會因內容物型別不同而錯開。 */
+.anum-cell { display: flex; align-items: center; min-height: 38px; }
+.anum-cell.is-center { justify-content: center; }
+/* 含較高多行輸入框的表格改靠上對齊，短欄位才不會浮在半空中。
+   注意要下在 td 上：容器本身只有 38px，是 td 的 vertical-align 決定它擺在哪。 */
+.anum-table.is-top td { vertical-align: top; }
+.anum-cell > input,
+.anum-cell > textarea,
+.anum-cell > .anum-ss-wrap { width: 100%; }
+.anum-cell-off { color: #aab2bb; font-size: 13px; }
+
+/* ── 觸發時機的勾選卡 ── */
+.anum-checks { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+.anum-check {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 16px;
+  border: 1px solid var(--anum-border-2); border-radius: 8px;
+  background: #fff; cursor: pointer; font-size: 14.5px;
+  transition: border-color .12s, background .12s;
+}
+.anum-check:hover { border-color: var(--anum-accent); background: var(--anum-accent-soft); }
+#ui-section input[type=checkbox] {
+  width: 18px; height: 18px; vertical-align: middle;
+  accent-color: var(--anum-accent); cursor: pointer; margin: 0;
 }
 
-/* ── 複選框群 ── */
-.anum-checks { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 12px; }
-#ui-section input[type=checkbox] { width: 16px; height: 16px; vertical-align: middle; accent-color: var(--anum-accent); }
+/* ── 進階設定（預設收合，避免一次塞太多選項） ── */
+.anum-adv { margin-top: 20px; border-top: 1px dashed var(--anum-border); padding-top: 14px; }
+.anum-adv > summary {
+  cursor: pointer; font-size: 14px; font-weight: 600;
+  color: var(--anum-accent); list-style: none;
+  padding: 6px 0; user-select: none;
+}
+.anum-adv > summary::-webkit-details-marker { display: none; }
+.anum-adv > summary::before { content: "▸ "; display: inline-block; transition: transform .15s; }
+.anum-adv[open] > summary::before { content: "▾ "; }
+.anum-adv > summary:hover { color: var(--anum-accent-dark); }
+.anum-adv-body { padding: 14px 2px 4px; }
 
 /* ── 按鈕 ── */
 .anum-btn {
-  padding: 7px 16px; font-size: 13.5px; font-weight: 500;
-  border-radius: 6px; cursor: pointer;
+  padding: 9px 20px; font-size: 14.5px; font-weight: 500;
+  border-radius: 7px; cursor: pointer;
   border: 1px solid var(--anum-border-2); background: #fff; color: var(--anum-text);
-  transition: background .12s, border-color .12s, box-shadow .12s;
+  font-family: inherit;
+  transition: background .12s, border-color .12s;
 }
-.anum-btn:hover { background: var(--anum-bg-soft); border-color: #b6bfc9; }
-.anum-btn:active { background: #eef1f4; }
-.anum-btn-primary { background: var(--anum-accent); color: #fff; border-color: var(--anum-accent); }
+.anum-btn:hover { background: var(--anum-bg-soft); border-color: #a9b4c0; }
+.anum-btn:active { background: #eceff3; }
+.anum-btn-primary { background: var(--anum-accent); color: #fff; border-color: var(--anum-accent); font-weight: 600; }
 .anum-btn-primary:hover { background: var(--anum-accent-dark); border-color: var(--anum-accent-dark); }
-.anum-btn-add { margin-top: 10px; }
+.anum-btn-add { margin-top: 14px; }
 .anum-btn-row {
-  color: var(--anum-danger); padding: 4px 10px;
+  color: var(--anum-danger); padding: 6px 12px;
   border: 1px solid transparent; background: transparent; cursor: pointer;
-  border-radius: 6px; font-size: 13px;
+  border-radius: 6px; font-size: 15px; line-height: 1;
 }
-.anum-btn-row:hover { background: #fbeceb; border-color: #f0c8c4; }
+.anum-btn-row:hover { background: #fbecea; border-color: #edc4bf; }
 
 /* ── 訊息 ── */
-.anum-error { color: var(--anum-danger); font-size: 13px; }
+.anum-error { color: var(--anum-danger); font-size: 14px; font-weight: 500; }
 
-/* ── 可搜尋下拉 ── */
+/* ── 可搜尋下拉選單 ── */
 .anum-ss-wrap { position: relative; }
 .anum-ss-input {
   width: 100%; box-sizing: border-box;
-  padding: 7px 26px 7px 9px; font-size: 13.5px; color: var(--anum-text);
-  border: 1px solid var(--anum-border-2); border-radius: 5px;
-  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23999'/%3E%3C/svg%3E") no-repeat right 9px center;
+  padding: 9px 25px 9px 11px; font-size: 14.5px; color: var(--anum-text);
+  font-family: inherit;
+  border: 1px solid var(--anum-border-2); border-radius: 6px;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23808b96'/%3E%3C/svg%3E") no-repeat right 11px center;
   cursor: pointer;
+  text-overflow: ellipsis;
 }
-.anum-ss-input:focus { outline: none; border-color: var(--anum-accent); box-shadow: 0 0 0 3px rgba(43,108,176,.15); cursor: text; }
+.anum-ss-input:focus {
+  outline: none; border-color: var(--anum-accent);
+  box-shadow: 0 0 0 3px rgba(37,99,168,.16); cursor: text;
+}
+
+/* 選單面板「不受輸入框寬度限制」：
+   min-width 保證至少與輸入框同寬，width:max-content 讓它依內容自動加寬，
+   因此長欄位名不會被截斷；max-width 只是避免超出視窗。 */
 .anum-ss-list {
   display: none;
-  position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 9999;
-  max-height: 260px; overflow-y: auto;
-  background: #fff; border: 1px solid var(--anum-border-2); border-radius: 6px;
-  box-shadow: 0 6px 18px rgba(16,24,40,.14);
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 9999;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(520px, 86vw);
+  max-height: 320px; overflow-y: auto;
+  background: #fff; border: 1px solid var(--anum-border-2); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(16,24,40,.16);
 }
+.anum-ss-list.is-open { display: block; }
+/* 靠右側的欄位改為向左展開，避免面板被視窗邊緣切掉 */
+.anum-ss-list.is-flip { left: auto; right: 0; }
+
 .anum-ss-item {
-  padding: 8px 12px; font-size: 13.5px; cursor: pointer;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--anum-text);
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 9px 14px; cursor: pointer; color: var(--anum-text);
+  border-bottom: 1px solid #f2f4f7;
 }
+.anum-ss-item:last-child { border-bottom: none; }
 .anum-ss-item:hover { background: var(--anum-accent-soft); }
-.anum-ss-item.anum-ss-active { font-weight: 700; }
-.anum-ss-empty { padding: 10px 12px; font-size: 13px; color: var(--anum-help); }
+.anum-ss-item.anum-ss-active { background: var(--anum-accent-soft); }
+.anum-ss-item.anum-ss-active .anum-ss-main::after { content: " ✓"; color: var(--anum-accent); font-weight: 700; }
+/* 完整顯示，不用 ellipsis 截斷 */
+.anum-ss-main { font-size: 14.5px; line-height: 1.5; word-break: break-word; }
+.anum-ss-sub { font-size: 12.5px; color: var(--anum-help); line-height: 1.5; word-break: break-all; }
+.anum-ss-empty { padding: 12px 14px; font-size: 14px; color: var(--anum-help); }
