@@ -240,7 +240,10 @@ GET 使用 query string（陣列展開為 `k[]`），非 GET 使用 JSON body（
 - **I5**：發號須在 `submit.success`（情境 A）或 `proceed` 原子寫入（情境 B）執行，不可移至 `submit` 階段，否則使用者取消時會造成跳號。
 - **I6**：最後防線為業務 App 編號欄位的「值的唯一性」；跨週期歸零可能產生重複字串，須靠此約束擋下。
   > **子表格模式的例外**：kintone 的「值的唯一性」不支援子表格內欄位，此模式下 I6 無法成立。
-  > 補償措施為 Counter App 的 `current` 設唯讀＋`category_key` 勾唯一性（見 README）。
+  > 補償措施為 Counter App 的 `current` 設唯讀，並新增 `unique_key` 欄位承載複合鍵的唯一性（見 README）。
+- **I10**：Counter App 的鍵是**複合鍵** `(source_app_id, category_key)`。`category_key` 單獨**不具唯一性**
+  ——不同業務 App 可以有相同的 `category_key`。若要以 kintone 的「值的唯一性」防止重複建檔，
+  必須另設 `unique_key` 欄位存放 `source_app_id-category_key` 的組合值，把約束勾在該欄位上。
 - **I8**（子表格模式）：必須「先規劃、再取號」——所有列的 `counterKey` 與抄錄值解析完畢後才可呼叫
   `reserveRange`。若邊解析邊取號，中途某列失敗會留下已消耗但未使用的號碼。
 - **I9**（子表格模式）：回寫子表格的 PUT 必須送出**所有列並帶上原本的 `id`**。kintone 的子表格為整包覆蓋，

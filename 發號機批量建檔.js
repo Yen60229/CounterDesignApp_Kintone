@@ -44,7 +44,23 @@
     resetCycle: 'reset_cycle',
     periodTag: 'period_tag',
     current: 'current',
+
+    // 複合鍵的唯一性防線（選用，但強烈建議）。
+    //
+    // 發號機的鍵是「(source_app_id, category_key)」的**複合鍵** —— 不同業務 App
+    // 本來就會有相同的 category_key（App 123 和 App 456 都可以有 N1新增），
+    // 所以 category_key 本身不能勾唯一性，勾了會把合法記錄擋掉。
+    // 而 kintone 的「值的唯一性」只能套在單一欄位，沒有複合唯一約束。
+    //
+    // 解法：多一個文字（單行）欄位存兩者的組合值，唯一性勾在它身上，
+    // 就能擋下「同一個 App 重複建了同一台計數器」——那是真正會產生重號的情境。
+    //
+    // 本欄位為選用：Counter App 沒有這個欄位時，工具會自動略過相關處理。
+    uniqueKey: 'unique_key',
   };
+
+  /** 複合鍵的組合值。 */
+  const buildUniqueKey = (sourceAppId, categoryKey) => `${sourceAppId}-${categoryKey}`;
 
   // active 欄位（核取方塊）的啟用值，需與 App 設定一致。
   const ACTIVE_VALUE = '啟用';
@@ -146,6 +162,22 @@
 
   const api = (endpoint, method, params) =>
     kintone.api(kintone.api.url(endpoint, true), method, params);
+
+  /**
+   * Counter App 自己有沒有 unique_key 欄位？（查一次就記住）
+   * 沒有的話所有與它相關的處理都自動略過，不會因為缺欄位而報錯。
+   */
+  let _hasUniqueKey = null;
+  const hasUniqueKeyField = async () => {
+    if (_hasUniqueKey !== null) return _hasUniqueKey;
+    try {
+      const form = await api('/k/v1/app/form/fields', 'GET', { app: kintone.app.getId() });
+      _hasUniqueKey = !!(form.properties && form.properties[F.uniqueKey]);
+    } catch {
+      _hasUniqueKey = false;
+    }
+    return _hasUniqueKey;
+  };
 
   /** 分頁取回所有記錄（Counter App 台數可能超過單次上限）。 */
   const fetchAll = async (app, query, fields) => {
@@ -264,6 +296,8 @@
    * @returns {{ options: string[], planned: object[], skipped: string[] }}
    */
   const buildPlan = async (cfg) => {
+    cfg.hasUniqueKey = await hasUniqueKeyField();
+
     // ① 從業務 App 的表單設定取得分組欄位的實際選項
     const form = await api('/k/v1/app/form/fields', 'GET', { app: cfg.sourceApp });
     const field = form.properties && form.properties[cfg.field];
@@ -340,7 +374,7 @@
 
         const periodTag = getPeriodTag(spec.resetCycle);
 
-        planned.push({
+        const rec = {
           [F.sourceAppId]: { value: String(cfg.sourceApp) },
           [F.categoryKey]: { value: categoryKey },
           [F.active]: { value: [ACTIVE_VALUE] },
@@ -353,7 +387,14 @@
           // current 的語意是「已發出的最大號碼」，先 +1 再使用。
           // 接續現有編號，避免第一次發號就與既有記錄撞號。
           [F.current]: { value: String(found.max) },
-        });
+        };
+
+        // 有 unique_key 欄位才寫，讓沒建這個欄位的 Counter App 也能正常使用
+        if (cfg.hasUniqueKey) {
+          rec[F.uniqueKey] = { value: buildUniqueKey(cfg.sourceApp, categoryKey) };
+        }
+
+        planned.push(rec);
 
         rows.push({
           categoryKey,
@@ -584,6 +625,72 @@
     document.body.appendChild(overlay);
   };
 
+  // ── unique_key 補寫（既有記錄的一次性遷移）──────────────────────────────
+  //
+  // 要對 unique_key 勾「值的唯一性」之前，既有記錄必須先全部填好——
+  // 一堆空值會被視為重複值而讓約束勾不起來。本功能就是補這一段。
+  const backfillUniqueKeys = async () => {
+    if (!(await hasUniqueKeyField())) {
+      alert(
+        `本 App 沒有「${F.uniqueKey}」欄位。\n\n` +
+          '請先新增一個「文字（單行）」欄位、欄位代碼設為 ' + F.uniqueKey + '，\n' +
+          '補寫完成後再回到該欄位設定勾選「值的重複禁止」。'
+      );
+      return;
+    }
+
+    const counterApp = kintone.app.getId();
+    const all = await fetchAll(counterApp, '', [F.sourceAppId, F.categoryKey, F.uniqueKey]);
+
+    const toFix = [];
+    const seen = new Map();
+    const dup = [];
+
+    all.forEach((r) => {
+      const src = (r[F.sourceAppId] && r[F.sourceAppId].value) || '';
+      const key = (r[F.categoryKey] && r[F.categoryKey].value) || '';
+      if (!src || !key) return;
+
+      const want = buildUniqueKey(src, key);
+      const now = (r[F.uniqueKey] && r[F.uniqueKey].value) || '';
+
+      // 順便找出「同一個 App 重複建了同一台計數器」——那正是會產生重號的情境，
+      // 有重複就不能直接補寫（補了也會因唯一性衝突而失敗），必須先由人工處理。
+      if (seen.has(want)) dup.push(want);
+      else seen.set(want, r.$id.value);
+
+      if (now !== want) toFix.push({ id: r.$id.value, record: { [F.uniqueKey]: { value: want } } });
+    });
+
+    if (dup.length) {
+      alert(
+        `發現重複的發號機（同一個 App 有兩台以上相同的 ${F.categoryKey}），無法補寫：\n\n` +
+          [...new Set(dup)].join('\n') +
+          '\n\n這正是會造成重號的情況，請先人工確認並刪除多餘的記錄。'
+      );
+      return;
+    }
+
+    if (toFix.length === 0) {
+      alert(`所有記錄的 ${F.uniqueKey} 都已正確，不需要補寫。\n\n可以放心去勾選「值的重複禁止」了。`);
+      return;
+    }
+
+    if (!confirm(`共 ${all.length} 筆記錄，其中 ${toFix.length} 筆需要補寫 ${F.uniqueKey}。\n\n要現在補寫嗎？`)) {
+      return;
+    }
+
+    for (let i = 0; i < toFix.length; i += BATCH_SIZE) {
+      await api('/k/v1/records', 'PUT', { app: counterApp, records: toFix.slice(i, i + BATCH_SIZE) });
+    }
+
+    alert(
+      `已補寫 ${toFix.length} 筆。\n\n` +
+        `最後一步：到「${F.uniqueKey}」欄位的設定勾選「值的重複禁止」，並更新 App。`
+    );
+    location.reload();
+  };
+
   // ── 進入點 ──────────────────────────────────────────────────────────────
 
   kintone.events.on('app.record.index.show', (event) => {
@@ -595,12 +702,48 @@
 
     injectStyle();
 
+    const header = kintone.app.getHeaderMenuSpaceElement();
+    if (!header) return event;
+
     const button = el('button', { id: BUTTON_ID, class: 'cs-btn' }, ['批量建立發號機']);
     button.onclick = openDialog;
+    header.appendChild(button);
 
-    const header = kintone.app.getHeaderMenuSpaceElement();
-    if (header) header.appendChild(button);
+    const fixBtn = el('button', { class: 'cs-btn cs-btn--ghost' }, [`補寫 ${F.uniqueKey}`]);
+    fixBtn.onclick = async () => {
+      fixBtn.disabled = true;
+      try {
+        await backfillUniqueKeys();
+      } catch (err) {
+        console.error('[counter-seed] 補寫失敗', err);
+        alert(`補寫失敗：${(err && err.message) || err}`);
+      }
+      fixBtn.disabled = false;
+    };
+    header.appendChild(fixBtn);
 
     return event;
   });
+
+  // ── 手動建檔／修改時自動維護 unique_key ─────────────────────────────────
+  // 沒有這段的話，管理者手動新增一台計數器就會漏掉 unique_key，
+  // 唯一性約束等於出現破口。
+  kintone.events.on(
+    ['app.record.create.submit', 'app.record.edit.submit',
+     'mobile.app.record.create.submit', 'mobile.app.record.edit.submit'],
+    async (event) => {
+      const record = event.record;
+      if (!record[F.uniqueKey]) return event; // App 沒有這個欄位 → 不處理
+
+      const src = (record[F.sourceAppId] && record[F.sourceAppId].value) || '';
+      const key = (record[F.categoryKey] && record[F.categoryKey].value) || '';
+      if (!src || !key) {
+        event.error = `請先填寫「${F.sourceAppId}」與「${F.categoryKey}」`;
+        return event;
+      }
+
+      record[F.uniqueKey].value = buildUniqueKey(src, key);
+      return event;
+    }
+  );
 })();

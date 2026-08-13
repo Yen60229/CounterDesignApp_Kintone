@@ -161,6 +161,21 @@ const main = async () => {
   console.log(`取得「${fieldCode}」選項 ${options.length} 個：${options.join(', ')}`);
   console.log('');
 
+  // ②-0 Counter App 有沒有 unique_key 欄位？
+  //     發號機的鍵是複合鍵 (source_app_id, category_key)，而 kintone 的「值的唯一性」
+  //     只能套在單一欄位，故需另存一個組合值欄位來承載唯一性約束。
+  //     沒有這個欄位時自動略過，不影響其他功能。
+  let hasUniqueKey = false;
+  try {
+    const counterForm = await counterApi('app/form/fields', 'GET', { app: counterApp });
+    hasUniqueKey = !!(counterForm.properties && counterForm.properties.unique_key);
+  } catch {
+    hasUniqueKey = false;
+  }
+  console.log(`Counter App ${hasUniqueKey ? '有' : '沒有'} unique_key 欄位` +
+    (hasUniqueKey ? '，將一併寫入複合鍵組合值。' : '（略過；建議新增以取得唯一性防線）。'));
+  console.log('');
+
   // ② 查出 Counter App 已存在的發號機，避免重複建檔
   const existingResp = await counterApi('records', 'GET', {
     app: counterApp,
@@ -191,7 +206,7 @@ const main = async () => {
       const categoryKey = `${option}${mode}`;
       if (existing.has(categoryKey)) { skipped.push(categoryKey); return; }
 
-      planned.push({
+      const rec = {
         source_app_id: { value: String(sourceApp) },
         category_key: { value: categoryKey },
         active: { value: ['啟用'] },
@@ -202,7 +217,11 @@ const main = async () => {
         period_tag: { value: '' },
         // I3：current 的語意是「已發出的最大號碼」，先 +1 再使用，故必為 0
         current: { value: '0' },
-      });
+      };
+
+      if (hasUniqueKey) rec.unique_key = { value: `${sourceApp}-${categoryKey}` };
+
+      planned.push(rec);
     });
   });
 
