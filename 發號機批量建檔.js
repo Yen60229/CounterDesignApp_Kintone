@@ -183,6 +183,29 @@
     kintone.api(kintone.api.url(endpoint, true), method, params);
 
   /**
+   * 把 kintone API 的錯誤物件轉成看得懂「哪個欄位、為什麼」的訊息。
+   *
+   * kintone.api() 失敗時 reject 的物件與 REST API 的錯誤回應同一種格式：
+   *   { code, id, message, errors: { 欄位代碼: { messages: ['必須項目です。', ...] } } }
+   * 若只顯示 message（如「入力エラーです。」＝「輸入錯誤」），完全看不出是哪個欄位、
+   * 缺什麼——這正是原本「建立失敗：輸入錯誤」訊息看不出原因的根本原因。
+   * errors 底下才是真正有用的逐欄位明細，這裡把它攤平印出來。
+   */
+  const describeApiError = (err) => {
+    const base = (err && err.message) || String(err);
+    if (!err || !err.errors) return base;
+
+    const details = Object.entries(err.errors)
+      .map(([field, info]) => {
+        const messages = (info && info.messages) || [];
+        return `・${field}：${messages.join('；') || '（無詳細訊息）'}`;
+      })
+      .join('\n');
+
+    return details ? `${base}\n${details}` : base;
+  };
+
+  /**
    * Counter App 自己的表單設定（查一次就記住，供 unique_key 判斷與「其他欄位」下拉共用）。
    */
   let _counterForm = null;
@@ -329,10 +352,50 @@
   // ── 核心：算出要建立哪些發號機 ──────────────────────────────────────────
 
   /**
+   * 建立前先檢查：Counter App 有沒有「本工具不知道、但被設成必填」的欄位？
+   * 有的話一定會被 kintone 擋下（就是畫面上看到的「輸入錯誤」），
+   * 但那個訊息不會講是哪個欄位，所以在這裡先攔截，直接把欄位名稱列出來。
+   *
+   * 判斷「涵蓋」的依據：本工具固定會填的欄位（RESERVED_FIELDS），
+   * 加上使用者在「其他欄位」選好的欄位。
+   */
+  const checkRequiredFields = async (cfg) => {
+    const form = await getCounterForm();
+    const required = Object.values(form.properties || {}).filter((f) => f.required);
+    if (required.length === 0) return;
+
+    const covered = new Set([...RESERVED_FIELDS, ...(cfg.extraFields || []).map((r) => r.field)]);
+    const missing = required.filter((f) => !covered.has(f.code));
+    if (missing.length === 0) return;
+
+    // 型別在 ALLOWED_EXTRA_TYPES 內的，使用者可以直接在「其他欄位」補；
+    // 型別是陣列／物件值的（核取方塊、使用者選擇…），本工具無法自動填，需請管理者調整。
+    const fillable = missing.filter((f) => ALLOWED_EXTRA_TYPES.has(f.type));
+    const unfillable = missing.filter((f) => !ALLOWED_EXTRA_TYPES.has(f.type));
+
+    const lines = [];
+    if (fillable.length) {
+      lines.push(
+        '以下必填欄位尚未設定值，請回上一步在「其他欄位」選擇並填入：\n  ' +
+          fillable.map((f) => `${f.label}（${f.code}）`).join('、')
+      );
+    }
+    if (unfillable.length) {
+      lines.push(
+        '以下必填欄位的型別本工具無法自動填值（需要陣列或物件值），' +
+          '請到 Counter App 的欄位設定將它們改為非必填，或建立後再手動逐筆補值：\n  ' +
+          unfillable.map((f) => `${f.label}（${f.code}・${f.type}）`).join('、')
+      );
+    }
+    throw new Error(lines.join('\n\n'));
+  };
+
+  /**
    * @returns {{ options: string[], planned: object[], skipped: string[] }}
    */
   const buildPlan = async (cfg) => {
     cfg.hasUniqueKey = await hasUniqueKeyField();
+    await checkRequiredFields(cfg);
 
     // ① 從業務 App 的表單設定取得分組欄位的實際選項
     const form = await api('/k/v1/app/form/fields', 'GET', { app: cfg.sourceApp });
@@ -653,7 +716,7 @@
           const plan = await buildPlan(cfg);
           renderPreview(cfg, plan);
         } catch (err) {
-          msg.textContent = `讀取失敗：${(err && err.message) || err}`;
+          msg.textContent = `讀取失敗：${describeApiError(err)}`;
           preview.disabled = false;
           preview.textContent = '預覽';
         }
@@ -775,8 +838,8 @@
           location.reload();
         } catch (err) {
           msg.textContent =
-            `建立失敗：${(err && err.message) || err}\n` +
-            '請確認本 App 具備上述所有欄位代碼，且您有新增記錄的權限。';
+            `建立失敗：${describeApiError(err)}\n\n` +
+            '若上面沒有列出欄位明細：請確認本 App 具備上述所有欄位代碼，且您有新增記錄的權限。';
           confirm.disabled = false;
           confirm.textContent = `確認建立 ${plan.planned.length} 台`;
         }
@@ -883,7 +946,7 @@
         await backfillUniqueKeys();
       } catch (err) {
         console.error('[counter-seed] 補寫失敗', err);
-        alert(`補寫失敗：${(err && err.message) || err}`);
+        alert(`補寫失敗：${describeApiError(err)}`);
       }
       fixBtn.disabled = false;
     };

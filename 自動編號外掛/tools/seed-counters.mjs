@@ -86,6 +86,13 @@ const RESERVED_FIELDS = new Set([
   'number_format', 'reset_cycle', 'period_tag', 'current', 'unique_key',
 ]);
 
+// --set 只接受這些型別——都是「填一個字串就能寫入」的型別。
+// 用於必填欄位檢查：不在這個集合裡的必填欄位無法透過 --set 補值。
+const ALLOWED_EXTRA_TYPES = new Set([
+  'SINGLE_LINE_TEXT', 'MULTI_LINE_TEXT', 'NUMBER', 'LINK',
+  'RADIO_BUTTON', 'DROP_DOWN', 'DATE', 'TIME', 'DATETIME',
+]);
+
 // ── kintone REST 呼叫 ───────────────────────────────────────────────────
 const makeClient = (baseUrl, token) => {
   const headers = { 'Content-Type': 'application/json' };
@@ -195,8 +202,9 @@ const main = async () => {
   //     只能套在單一欄位，故需另存一個組合值欄位來承載唯一性約束。
   //     沒有這個欄位時自動略過，不影響其他功能。
   let hasUniqueKey = false;
+  let counterForm = { properties: {} };
   try {
-    const counterForm = await counterApi('app/form/fields', 'GET', { app: counterApp });
+    counterForm = await counterApi('app/form/fields', 'GET', { app: counterApp });
     hasUniqueKey = !!(counterForm.properties && counterForm.properties.unique_key);
   } catch {
     hasUniqueKey = false;
@@ -204,6 +212,29 @@ const main = async () => {
   console.log(`Counter App ${hasUniqueKey ? '有' : '沒有'} unique_key 欄位` +
     (hasUniqueKey ? '，將一併寫入複合鍵組合值。' : '（略過；建議新增以取得唯一性防線）。'));
   console.log('');
+
+  // ①-1 必填欄位檢查：Counter App 若有「本工具不知道、但被設成必填」的欄位，
+  //     一定會在建立時被 kintone 擋下，且錯誤訊息通常不會講是哪個欄位（只會說「輸入錯誤」）。
+  //     這裡先攔截、直接把欄位列出來，--set 可以補、其餘型別需請管理者調整。
+  const requiredFields = Object.values(counterForm.properties || {}).filter((f) => f.required);
+  const covered = new Set([...RESERVED_FIELDS, ...extraFields.map((r) => r.field)]);
+  const missingRequired = requiredFields.filter((f) => !covered.has(f.code));
+
+  if (missingRequired.length) {
+    const fillable = missingRequired.filter((f) => ALLOWED_EXTRA_TYPES.has(f.type));
+    const unfillable = missingRequired.filter((f) => !ALLOWED_EXTRA_TYPES.has(f.type));
+    const lines = [];
+    if (fillable.length) {
+      lines.push('以下必填欄位尚未設定值，請加上 --set 補：\n  ' +
+        fillable.map((f) => `${f.label}（${f.code}）`).join('、'));
+    }
+    if (unfillable.length) {
+      lines.push('以下必填欄位的型別本工具無法自動填值（需要陣列或物件值），' +
+        '請到 Counter App 的欄位設定將它們改為非必填，或建立後再手動逐筆補值：\n  ' +
+        unfillable.map((f) => `${f.label}（${f.code}・${f.type}）`).join('、'));
+    }
+    throw new Error(lines.join('\n\n'));
+  }
 
   // ② 查出 Counter App 已存在的發號機，避免重複建檔
   const existingResp = await counterApi('records', 'GET', {
