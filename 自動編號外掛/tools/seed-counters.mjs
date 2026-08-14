@@ -18,6 +18,12 @@
 //   --modes=新增,修改    每個選項要建立的情境（預設：新增,修改）
 //   --prefix=NX          編號前綴（預設：NX）
 //   --pad=3              流水號補零位數（預設：3）
+//   --set=欄位代碼=值     Counter App 若還有其他欄位（例如部門、負責人），且本次建立的
+//                        每一筆都要填同樣的值，可重複帶多個 --set。例：
+//                        --set=部門=資訊部 --set=負責人=王小明
+//                        不可用來設定 source_app_id / category_key / prefix / pad /
+//                        number_format / reset_cycle / period_tag / current / unique_key
+//                        ——這些欄位的值由本工具批量計算，自行覆蓋會破壞結果。
 //
 // 認證（擇一，寫在專案根目錄的 .env 或直接用環境變數）：
 //   KINTONE_BASE_URL=https://xxx.cybozu.com
@@ -60,14 +66,25 @@ const loadEnv = () => {
 
 // ── 參數解析 ────────────────────────────────────────────────────────────
 const parseArgs = () => {
-  const out = { apply: false };
+  const out = { apply: false, set: [] };
   process.argv.slice(2).forEach((arg) => {
     if (arg === '--apply') { out.apply = true; return; }
+
+    // --set 可重複出現，逐一收集，不可像其他參數一樣後蓋前
+    const setMatch = arg.match(/^--set=([^=]+)=(.*)$/);
+    if (setMatch) { out.set.push({ field: setMatch[1], value: setMatch[2] }); return; }
+
     const m = arg.match(/^--([^=]+)=(.*)$/);
     if (m) out[m[1]] = m[2];
   });
   return out;
 };
+
+// 已經由本工具決定值的欄位代碼——--set 不可以填這些，否則會覆蓋掉前面算好的分組結果。
+const RESERVED_FIELDS = new Set([
+  'source_app_id', 'category_key', 'active', 'prefix', 'pad',
+  'number_format', 'reset_cycle', 'period_tag', 'current', 'unique_key',
+]);
 
 // ── kintone REST 呼叫 ───────────────────────────────────────────────────
 const makeClient = (baseUrl, token) => {
@@ -130,6 +147,18 @@ const main = async () => {
   const modes = (args.modes || '新增,修改').split(',').map((s) => s.trim()).filter(Boolean);
   const prefixBase = args.prefix || 'NX';
   const pad = String(args.pad || '3');
+
+  const extraFields = args.set || [];
+  const badSet = extraFields.find((r) => RESERVED_FIELDS.has(r.field));
+  if (badSet) {
+    throw new Error(
+      `--set 不可使用「${badSet.field}」——這是本工具已經在管理的欄位，自行填值會覆蓋掉批量計算出來的內容。`
+    );
+  }
+  if (extraFields.length) {
+    console.log(`每一台待建立的計數器都會一併填入：${extraFields.map((r) => `${r.field}=${r.value}`).join('、')}`);
+    console.log('');
+  }
 
   const sourceApi = makeClient(baseUrl, process.env.KINTONE_SOURCE_TOKEN);
   const counterApi = makeClient(baseUrl, process.env.KINTONE_COUNTER_TOKEN);
@@ -220,6 +249,8 @@ const main = async () => {
       };
 
       if (hasUniqueKey) rec.unique_key = { value: `${sourceApp}-${categoryKey}` };
+
+      extraFields.forEach(({ field, value }) => { rec[field] = { value }; });
 
       planned.push(rec);
     });

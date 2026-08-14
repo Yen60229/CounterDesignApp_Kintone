@@ -93,6 +93,10 @@
   const BATCH_SIZE = 100;
   const QUERY_LIMIT = 500;
 
+  // 已經由本工具決定值的欄位代碼——「其他欄位」不可以填這些，否則會覆蓋掉
+  // 前面算好的分組結果（current、number_format 等）。
+  const RESERVED_FIELDS = new Set(Object.values(F));
+
   const BUTTON_ID = 'counter-seed-button';
   const STYLE_ID = 'counter-seed-style';
 
@@ -145,6 +149,13 @@
       .cs-row > label { width: 150px; flex: none; color: #555; }
       .cs-row > input { flex: 1; padding: 6px 8px; border: 1px solid #ccc; border-radius: 3px; }
       .cs-hint { color: #888; font-size: 12px; margin: 4px 0 14px 150px; }
+
+      .cs-extra-fields { margin: 0 0 14px 150px; max-width: 480px; }
+      .cs-extra-row { display: flex; gap: 6px; margin-bottom: 6px; }
+      .cs-extra-row input {
+        flex: 1; padding: 6px 8px; border: 1px solid #ccc; border-radius: 3px; min-width: 0;
+      }
+      .cs-btn--small { padding: 4px 10px; font-size: 12px; margin: 0; }
 
       .cs-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
       .cs-table th, .cs-table td {
@@ -394,6 +405,12 @@
           rec[F.uniqueKey] = { value: buildUniqueKey(cfg.sourceApp, categoryKey) };
         }
 
+        // 其他欄位：使用者自由填的「這批全部記錄都相同」的值（例：部門、備註）。
+        // 已在畫面端擋過與 RESERVED_FIELDS 衝突，這裡不會覆蓋掉上面算好的值。
+        (cfg.extraFields || []).forEach(({ field, value }) => {
+          rec[field] = { value };
+        });
+
         planned.push(rec);
 
         rows.push({
@@ -453,6 +470,41 @@
       if (hint) body.appendChild(el('div', { class: 'cs-hint' }, [hint]));
     };
 
+    // 「其他欄位」：使用者自由填的欄位代碼＝值，套用到本次建立的每一筆記錄
+    // （例：Counter App 若有部門、負責人這類欄位，這批全部要填一樣的值）。
+    // 存在 openDialog 這層，切換「預覽 ↔ 上一步」時內容不會被清空。
+    let extraFields = [{ field: '', value: '' }];
+
+    const renderExtraFields = (container) => {
+      container.textContent = '';
+
+      extraFields.forEach((row, i) => {
+        const fieldInput = el('input', { type: 'text', placeholder: '欄位代碼', value: row.field });
+        fieldInput.addEventListener('input', (e) => { row.field = e.target.value; });
+
+        const valueInput = el('input', { type: 'text', placeholder: '值', value: row.value });
+        valueInput.addEventListener('input', (e) => { row.value = e.target.value; });
+
+        const removeBtn = el('button', { class: 'cs-btn cs-btn--ghost cs-btn--small' }, ['✕']);
+        removeBtn.onclick = () => {
+          extraFields.splice(i, 1);
+          if (extraFields.length === 0) extraFields.push({ field: '', value: '' });
+          renderExtraFields(container);
+        };
+
+        container.appendChild(
+          el('div', { class: 'cs-extra-row' }, [fieldInput, valueInput, removeBtn])
+        );
+      });
+
+      const addBtn = el('button', { class: 'cs-btn cs-btn--ghost cs-btn--small' }, ['+ 新增一列']);
+      addBtn.onclick = () => {
+        extraFields.push({ field: '', value: '' });
+        renderExtraFields(container);
+      };
+      container.appendChild(addBtn);
+    };
+
     // ── 步驟一：填參數 ──
     const renderForm = () => {
       body.textContent = '';
@@ -468,6 +520,17 @@
       addRow('prefix', '前綴', '會與分組選項值相接，例：NX + N1 → NXN1');
       addRow('pad', '流水號補零位數', '例：3 → 001');
       addRow('numberField', '業務 App 的編號欄位', '要掃描既有編號的欄位代碼。每台計數器的 current 會接續該欄位現有的最大號，避免第一次發號就撞號。');
+
+      body.appendChild(el('div', { class: 'cs-row' }, [el('label', {}, ['其他欄位（可選）'])]));
+      body.appendChild(
+        el('div', { class: 'cs-hint' }, [
+          'Counter App 若還有別的欄位（例如部門、負責人），且本次建立的每一筆都要填同樣的值，' +
+            '在這裡自由輸入「欄位代碼」與「值」即可。不需要就留空不填。',
+        ])
+      );
+      const extraContainer = el('div', { class: 'cs-extra-fields' });
+      renderExtraFields(extraContainer);
+      body.appendChild(extraContainer);
 
       const msg = el('div', { class: 'cs-error' });
       body.appendChild(msg);
@@ -506,6 +569,35 @@
           return;
         }
 
+        // 「其他欄位」驗證：忽略完全空白的列（使用者沒填），
+        // 有填欄位代碼就必須成對、不可重複、不可與本工具已用的欄位衝突。
+        const filled = extraFields
+          .map((r) => ({ field: r.field.trim(), value: r.value }))
+          .filter((r) => r.field || r.value);
+
+        const badRow = filled.find((r) => !r.field);
+        if (badRow) {
+          msg.textContent = '「其他欄位」有填值卻沒填欄位代碼的列，請補上或清空該列';
+          return;
+        }
+
+        const reserved = filled.find((r) => RESERVED_FIELDS.has(r.field));
+        if (reserved) {
+          msg.textContent =
+            `「其他欄位」不可使用「${reserved.field}」——這是本工具已經在管理的欄位，` +
+            '自行填值會覆蓋掉批量計算出來的內容。';
+          return;
+        }
+
+        const seen = new Set();
+        const dupField = filled.find((r) => (seen.has(r.field) ? true : (seen.add(r.field), false)));
+        if (dupField) {
+          msg.textContent = `「其他欄位」重複填了「${dupField.field}」，請合併成一列`;
+          return;
+        }
+
+        cfg.extraFields = filled.filter((r) => r.field);
+
         preview.disabled = true;
         preview.textContent = '讀取中...';
         try {
@@ -538,6 +630,14 @@
             `待建立 ${plan.planned.length} 台，略過 ${plan.skipped.length} 台（已存在）`,
         ])
       );
+
+      if (cfg.extraFields && cfg.extraFields.length) {
+        body.appendChild(
+          el('div', { class: 'cs-summary' }, [
+            `每一台待建立的計數器都會一併填入：${cfg.extraFields.map((r) => `${r.field}=${r.value}`).join('、')}`,
+          ])
+        );
+      }
 
       // 每一台都列出來：包含已存在者，方便核對目前號碼
       const table = el('table', { class: 'cs-table' });
@@ -656,7 +756,9 @@
     }
 
     const counterApp = kintone.app.getId();
-    const all = await fetchAll(counterApp, '', [F.sourceAppId, F.categoryKey, F.uniqueKey]);
+    // $id 必須明確列在 fields 裡——指定了 fields 時 kintone 只回傳清單內的欄位，
+    // 沒帶到的話 r.$id 會是 undefined，下面存取 r.$id.value 就會炸掉。
+    const all = await fetchAll(counterApp, '', ['$id', F.sourceAppId, F.categoryKey, F.uniqueKey]);
 
     const toFix = [];
     const seen = new Map();
