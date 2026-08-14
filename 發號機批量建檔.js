@@ -97,6 +97,14 @@
   // 前面算好的分組結果（current、number_format 等）。
   const RESERVED_FIELDS = new Set(Object.values(F));
 
+  // 「其他欄位」下拉選單只列出這些型別——都是「填一個字串就能寫入」的型別。
+  // 排除 CHECK_BOX / USER_SELECT / FILE / SUBTABLE 這類需要陣列或物件值的型別，
+  // 以及 CALC／CREATOR／UPDATED_TIME 這類系統或唯讀欄位（寫入會被 kintone 拒絕或忽略）。
+  const ALLOWED_EXTRA_TYPES = new Set([
+    'SINGLE_LINE_TEXT', 'MULTI_LINE_TEXT', 'NUMBER', 'LINK',
+    'RADIO_BUTTON', 'DROP_DOWN', 'DATE', 'TIME', 'DATETIME',
+  ]);
+
   const BUTTON_ID = 'counter-seed-button';
   const STYLE_ID = 'counter-seed-style';
 
@@ -152,7 +160,7 @@
 
       .cs-extra-fields { margin: 0 0 14px 150px; max-width: 480px; }
       .cs-extra-row { display: flex; gap: 6px; margin-bottom: 6px; }
-      .cs-extra-row input {
+      .cs-extra-row input, .cs-extra-row select {
         flex: 1; padding: 6px 8px; border: 1px solid #ccc; border-radius: 3px; min-width: 0;
       }
       .cs-btn--small { padding: 4px 10px; font-size: 12px; margin: 0; }
@@ -175,19 +183,36 @@
     kintone.api(kintone.api.url(endpoint, true), method, params);
 
   /**
-   * Counter App 自己有沒有 unique_key 欄位？（查一次就記住）
-   * 沒有的話所有與它相關的處理都自動略過，不會因為缺欄位而報錯。
+   * Counter App 自己的表單設定（查一次就記住，供 unique_key 判斷與「其他欄位」下拉共用）。
    */
-  let _hasUniqueKey = null;
-  const hasUniqueKeyField = async () => {
-    if (_hasUniqueKey !== null) return _hasUniqueKey;
+  let _counterForm = null;
+  const getCounterForm = async () => {
+    if (_counterForm) return _counterForm;
     try {
-      const form = await api('/k/v1/app/form/fields', 'GET', { app: kintone.app.getId() });
-      _hasUniqueKey = !!(form.properties && form.properties[F.uniqueKey]);
+      _counterForm = await api('/k/v1/app/form/fields', 'GET', { app: kintone.app.getId() });
     } catch {
-      _hasUniqueKey = false;
+      _counterForm = { properties: {} };
     }
-    return _hasUniqueKey;
+    return _counterForm;
+  };
+
+  /** Counter App 自己有沒有 unique_key 欄位？沒有的話相關處理自動略過，不會因缺欄位而報錯。 */
+  const hasUniqueKeyField = async () => {
+    const form = await getCounterForm();
+    return !!(form.properties && form.properties[F.uniqueKey]);
+  };
+
+  /**
+   * 「其他欄位」下拉選單的候選清單：Counter App 自己的欄位中，
+   * 排除本工具已管理的欄位（RESERVED_FIELDS），並只留下「填一個字串就能寫入」的型別
+   * （ALLOWED_EXTRA_TYPES），避免使用者手動輸入欄位代碼打錯字。
+   */
+  const getExtraFieldOptions = async () => {
+    const form = await getCounterForm();
+    return Object.values(form.properties || {})
+      .filter((f) => !RESERVED_FIELDS.has(f.code) && ALLOWED_EXTRA_TYPES.has(f.type))
+      .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hant'))
+      .map((f) => ({ code: f.code, label: f.label, type: f.type }));
   };
 
   /** 分頁取回所有記錄（Counter App 台數可能超過單次上限）。 */
@@ -470,17 +495,41 @@
       if (hint) body.appendChild(el('div', { class: 'cs-hint' }, [hint]));
     };
 
-    // 「其他欄位」：使用者自由填的欄位代碼＝值，套用到本次建立的每一筆記錄
-    // （例：Counter App 若有部門、負責人這類欄位，這批全部要填一樣的值）。
+    // 「其他欄位」：從 Counter App 現有欄位選，套用到本次建立的每一筆記錄
+    // （例：部門、負責人這類欄位，這批全部要填一樣的值）。
     // 存在 openDialog 這層，切換「預覽 ↔ 上一步」時內容不會被清空。
     let extraFields = [{ field: '', value: '' }];
+    let fieldOptions = null; // null = 尚未載入；載入後為陣列（可能是空陣列）
 
-    const renderExtraFields = (container) => {
+    const renderExtraFields = async (container) => {
+      if (fieldOptions === null) {
+        container.textContent = '';
+        container.appendChild(el('div', { class: 'cs-hint' }, ['讀取欄位清單中...']));
+        fieldOptions = await getExtraFieldOptions();
+      }
+
       container.textContent = '';
 
+      if (fieldOptions.length === 0) {
+        container.appendChild(
+          el('div', { class: 'cs-hint' }, [
+            '本 Counter App 沒有可選的其他欄位（已扣除本工具管理的欄位，' +
+              '並僅列出可直接填字串的型別，如單行文字／數字／日期／下拉選單等）。',
+          ])
+        );
+        return;
+      }
+
       extraFields.forEach((row, i) => {
-        const fieldInput = el('input', { type: 'text', placeholder: '欄位代碼', value: row.field });
-        fieldInput.addEventListener('input', (e) => { row.field = e.target.value; });
+        const fieldSelect = el('select', {});
+        fieldSelect.appendChild(el('option', { value: '' }, ['— 選擇欄位 —']));
+        fieldOptions.forEach((opt) => {
+          fieldSelect.appendChild(
+            el('option', { value: opt.code }, [`${opt.label}（${opt.code}）`])
+          );
+        });
+        fieldSelect.value = row.field;
+        fieldSelect.addEventListener('change', (e) => { row.field = e.target.value; });
 
         const valueInput = el('input', { type: 'text', placeholder: '值', value: row.value });
         valueInput.addEventListener('input', (e) => { row.value = e.target.value; });
@@ -493,7 +542,7 @@
         };
 
         container.appendChild(
-          el('div', { class: 'cs-extra-row' }, [fieldInput, valueInput, removeBtn])
+          el('div', { class: 'cs-extra-row' }, [fieldSelect, valueInput, removeBtn])
         );
       });
 
@@ -525,7 +574,7 @@
       body.appendChild(
         el('div', { class: 'cs-hint' }, [
           'Counter App 若還有別的欄位（例如部門、負責人），且本次建立的每一筆都要填同樣的值，' +
-            '在這裡自由輸入「欄位代碼」與「值」即可。不需要就留空不填。',
+            '從下拉選單選欄位、填值即可，欄位代碼直接帶入不會打錯字。不需要就留空不填。',
         ])
       );
       const extraContainer = el('div', { class: 'cs-extra-fields' });
