@@ -577,6 +577,22 @@
         ])
       );
 
+      // 既有計數器的 current 落後於實際最大號 → 下次發號會撞號，必須提出來
+      const drift = plan.rows.filter(
+        (r) => r.status === '已存在' && r.found.max > Number(r.existingCurrent || 0)
+      );
+      if (drift.length) {
+        body.appendChild(
+          el('div', { class: 'cs-warn' }, [
+            '⚠ 下列既有計數器的 current 小於實際已使用的最大號，下次發號會產生重複編號，' +
+              '請手動把 current 調到括號中的數字：' +
+              drift
+                .map((r) => `${r.categoryKey}（current=${r.existingCurrent} → 應為 ${r.found.max}）`)
+                .join('、'),
+          ])
+        );
+      }
+
       if (plan.oddCodes.length) {
         body.appendChild(
           el('div', { class: 'cs-warn' }, [
