@@ -18,6 +18,9 @@
 //   --modes=新增,修改    每個選項要建立的情境（預設：新增,修改）
 //   --prefix=NX          編號前綴（預設：NX）
 //   --pad=3              流水號補零位數（預設：3）
+//   --number-field=設備代號  業務 App 存放編號的欄位（預設：設備代號）。
+//                        建檔前會掃描此欄位現有的值，把每台計數器的 current 接續到
+//                        目前已使用的最大號，避免第一次發號就與既有記錄撞號。
 //   --set=欄位代碼=值     Counter App 若還有其他欄位（例如部門、負責人），且本次建立的
 //                        每一筆都要填同樣的值，可重複帶多個 --set。例：
 //                        --set=部門=資訊部 --set=負責人=王小明
@@ -34,6 +37,10 @@
 //
 // 本工具為冪等：已存在相同 (source_app_id, category_key) 的發號機會自動略過，
 // 重複執行不會建出重複的計數器，也不會覆蓋既有的 current 值。
+//
+// reset_cycle 欄位若使用中文選項（不重置/每年重置…）也能自動辨識，不需要事先
+// 知道這台 Counter App 用的是英文常數還是中文選項；建立前也會先檢查 Counter App
+// 有沒有本工具不知道、卻被設成必填的欄位，有的話直接列出來，不必等到寫入失敗才知道原因。
 // =========================================================================
 
 import fs from 'node:fs';
@@ -92,6 +99,111 @@ const ALLOWED_EXTRA_TYPES = new Set([
   'SINGLE_LINE_TEXT', 'MULTI_LINE_TEXT', 'NUMBER', 'LINK',
   'RADIO_BUTTON', 'DROP_DOWN', 'DATE', 'TIME', 'DATETIME',
 ]);
+
+// reset_cycle 是各 Counter App 自建的下拉欄位，選項文字由管理者自己決定；
+// 目前並存兩種寫法：英文常數（NONE/YEARLY/MONTHLY/DAILY，外掛原始文件的寫法）
+// 與中文選項（不重置/每年重置/每月重置/每日重置）。下方 MODE_SPEC 內部一律用
+// 英文語意值，實際要寫入 kintone 的字串於 resolveResetCycleOptions() 依這台
+// Counter App 真正的下拉選項動態解析——寫錯字串 kintone 會直接拒絕整批寫入
+// （下拉選單嚴格檢查值是否存在於選項清單），這樣就不必事先知道欄位用的是哪種語言。
+const RESET_CYCLE_ALIASES = {
+  NONE: 'NONE', '不重置': 'NONE',
+  YEARLY: 'YEARLY', '每年重置': 'YEARLY',
+  MONTHLY: 'MONTHLY', '每月重置': 'MONTHLY',
+  DAILY: 'DAILY', '每日重置': 'DAILY',
+};
+
+// 各「情境」對應的編號樣式與歸零週期。reset 為內部語意值，
+// 實際寫入 kintone 的字串於執行時依 Counter App 的選項解析（見 resetCycleMap）。
+//   {prefix}{YY}{seq} → NXN126001（每年歸零）
+//   {prefix}99{seq}   → NXN199001（不歸零，固定 99 區段）
+const MODE_SPEC_PREVIEW = {
+  新增: { format: '{prefix}{YY}{seq}', reset: 'YEARLY' },
+  修改: { format: '{prefix}99{seq}', reset: 'NONE' },
+  // 別名：若表單的「設備需求」選項寫的是「調整」而非「修改」，直接用 調整 即可
+  調整: { format: '{prefix}99{seq}', reset: 'NONE' },
+};
+
+/** 與外掛 desktop.js 的 getPeriodTag() 邏輯一致，唯一差異是 cycle 這裡固定吃語意值。 */
+const pad2 = (n) => String(n).padStart(2, '0');
+const getPeriodTag = (cycle) => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = pad2(now.getMonth() + 1);
+  const d = pad2(now.getDate());
+  switch (cycle) {
+    case 'YEARLY':  return `${y}`;
+    case 'MONTHLY': return `${y}${m}`;
+    case 'DAILY':   return `${y}${m}${d}`;
+    default:        return ''; // NONE：永久累加
+  }
+};
+
+/**
+ * 把 number_format 拆成「{seq} 之前／之後的固定字串」，並代換 {prefix}/{YYYY}/{YY}/
+ * {MM}/{DD}/{period}。用途：判斷「現有哪些編號屬於這台計數器」，才能算出起始 current。
+ * 與 發號機批量建檔.js 的 splitFormat() 邏輯一致。
+ */
+const splitFormat = (numberFormat, prefix, cycle) => {
+  const now = new Date();
+  const yyyy = String(now.getFullYear());
+  const render = (s) =>
+    s
+      .replace(/\{prefix\}/g, prefix)
+      .replace(/\{YYYY\}/g, yyyy)
+      .replace(/\{YY\}/g, yyyy.slice(-2))
+      .replace(/\{MM\}/g, pad2(now.getMonth() + 1))
+      .replace(/\{DD\}/g, pad2(now.getDate()))
+      .replace(/\{period\}/g, getPeriodTag(cycle));
+
+  const parts = numberFormat.split(/\{seq(?::\d+)?\}/);
+  return { head: render(parts[0] || ''), tail: render(parts[1] || '') };
+};
+
+/**
+ * 在現有編號中找出屬於這台計數器的最大流水號。
+ * 與 發號機批量建檔.js 的 scanMax() 邏輯一致：位數不符的視為舊制編號，不列入計算。
+ */
+const scanMax = (codes, head, tail, pad) => {
+  let max = 0;
+  let sample = '';
+  const odd = [];
+
+  codes.forEach((code) => {
+    if (!code.startsWith(head)) return;
+    if (tail && !code.endsWith(tail)) return;
+
+    const middle = code.slice(head.length, tail ? code.length - tail.length : undefined);
+    if (!/^\d+$/.test(middle)) return;
+
+    if (middle.length !== Number(pad)) {
+      if (odd.length < 5) odd.push(code);
+      return;
+    }
+
+    const seq = Number(middle);
+    if (seq > max) { max = seq; sample = code; }
+  });
+
+  return { max, sample, odd };
+};
+
+/** 分頁取回所有記錄（業務 App 的記錄數可能超過單次 500 筆上限）。 */
+const fetchAllRecords = async (client, app, query, fields) => {
+  const all = [];
+  let offset = 0;
+  for (;;) {
+    const resp = await client('records', 'GET', {
+      app,
+      query: `${query} limit 500 offset ${offset}`.trim(),
+      fields,
+    });
+    const batch = resp.records || [];
+    all.push(...batch);
+    if (batch.length < 500) return all;
+    offset += 500;
+  }
+};
 
 // ── kintone REST 呼叫 ───────────────────────────────────────────────────
 const makeClient = (baseUrl, token) => {
@@ -154,6 +266,7 @@ const main = async () => {
   const modes = (args.modes || '新增,修改').split(',').map((s) => s.trim()).filter(Boolean);
   const prefixBase = args.prefix || 'NX';
   const pad = String(args.pad || '3');
+  const numberField = args['number-field'] || '設備代號';
 
   const extraFields = args.set || [];
   const badSet = extraFields.find((r) => RESERVED_FIELDS.has(r.field));
@@ -236,6 +349,31 @@ const main = async () => {
     throw new Error(lines.join('\n\n'));
   }
 
+  // ①-2 reset_cycle 的實際選項字串由這台 Counter App 自己決定（英文或中文皆可）。
+  //     先確認本次會用到的每個情境都能對應到一個實際選項，找不到就先中止，
+  //     不要等到批次寫入時才被 kintone 用「輸入錯誤」擋下、卻看不出是哪個欄位。
+  const resetCycleField = counterForm.properties && counterForm.properties.reset_cycle;
+  if (!resetCycleField || !resetCycleField.options) {
+    throw new Error('Counter App 找不到「reset_cycle」欄位，或它不是下拉/單選型別');
+  }
+  const resetCycleOptionValues = Object.keys(resetCycleField.options);
+  const resetCycleMap = {};
+  resetCycleOptionValues.forEach((v) => {
+    const semantic = RESET_CYCLE_ALIASES[v];
+    if (semantic) resetCycleMap[semantic] = v;
+  });
+
+  const neededCycles = [...new Set(modes.map((m) => (MODE_SPEC_PREVIEW[m] || {}).reset))].filter(Boolean);
+  const missingCycles = neededCycles.filter((semantic) => !resetCycleMap[semantic]);
+  if (missingCycles.length) {
+    throw new Error(
+      `Counter App 的「reset_cycle」欄位選項裡，找不到對應下列週期的選項：${missingCycles.join('、')}\n` +
+        `目前的選項：${resetCycleOptionValues.join('、') || '（無）'}\n` +
+        '請到欄位設定新增對應選項（例如「每年重置」或英文 YEARLY 皆可），' +
+        '或於本檔調整 RESET_CYCLE_ALIASES 對照表。'
+    );
+  }
+
   // ② 查出 Counter App 已存在的發號機，避免重複建檔
   const existingResp = await counterApi('records', 'GET', {
     app: counterApp,
@@ -247,36 +385,48 @@ const main = async () => {
   );
   if (existing.size) console.log(`Counter App 已有 ${existing.size} 台發號機，將自動略過。\n`);
 
-  // ③ 組出待建立的發號機
-  //    新增 → 依年度歸零，號碼含年碼：NXN126001
-  //    修改 → 不歸零，號碼固定用 99 區段：NXN199001
-  const MODE_SPEC = {
-    新增: { format: '{prefix}{YY}{seq}', reset: 'YEARLY' },
-    修改: { format: '{prefix}99{seq}', reset: 'NONE' },
-  };
+  // ②-1 掃描業務 App 現有的編號，決定每一台的起始 current。
+  //     若一律從 0 開始，第一次發號就會產生與現有記錄相同的號碼而撞號。
+  const codeRecords = await fetchAllRecords(sourceApi, sourceApp, `${numberField} != ""`, [numberField]);
+  const codes = codeRecords
+    .map((r) => r[numberField] && r[numberField].value)
+    .filter(Boolean)
+    .map((v) => String(v).trim());
+  console.log(`已掃描「${numberField}」現有編號 ${codes.length} 筆。\n`);
+  const oddCodes = [];
 
+  // ③ 組出待建立的發號機
   const planned = [];
   const skipped = [];
 
   options.forEach((option) => {
     modes.forEach((mode) => {
-      const spec = MODE_SPEC[mode];
-      if (!spec) throw new Error(`未定義的情境「${mode}」，請在 MODE_SPEC 中補上格式與歸零週期`);
+      const spec = MODE_SPEC_PREVIEW[mode];
+      if (!spec) throw new Error(`未定義的情境「${mode}」，請在 MODE_SPEC_PREVIEW 中補上格式與歸零週期`);
 
       const categoryKey = `${option}${mode}`;
       if (existing.has(categoryKey)) { skipped.push(categoryKey); return; }
+
+      // 掃描現有編號，決定這台計數器的起始 current（接續已使用的最大號）
+      const prefix = `${prefixBase}${option}`;
+      const { head, tail } = splitFormat(spec.format, prefix, spec.reset);
+      const found = scanMax(codes, head, tail, pad);
+      found.odd.forEach((c) => oddCodes.length < 10 && oddCodes.push(c));
 
       const rec = {
         source_app_id: { value: String(sourceApp) },
         category_key: { value: categoryKey },
         active: { value: ['啟用'] },
-        prefix: { value: `${prefixBase}${option}` },
+        prefix: { value: prefix },
         pad: { value: pad },
         number_format: { value: spec.format },
-        reset_cycle: { value: spec.reset },
-        period_tag: { value: '' },
-        // I3：current 的語意是「已發出的最大號碼」，先 +1 再使用，故必為 0
-        current: { value: '0' },
+        // 寫入實際存在於這台 Counter App 選項清單裡的字串，而非寫死的英文語意值
+        reset_cycle: { value: resetCycleMap[spec.reset] },
+        // 必須設成當期標記，否則外掛第一次發號會判定跨週期而把號碼歸零到 1
+        period_tag: { value: getPeriodTag(spec.reset) },
+        // I3：current 的語意是「已發出的最大號碼」，先 +1 再使用。
+        // 接續現有編號，避免第一次發號就與既有記錄撞號。
+        current: { value: String(found.max) },
       };
 
       if (hasUniqueKey) rec.unique_key = { value: `${sourceApp}-${categoryKey}` };
@@ -290,17 +440,30 @@ const main = async () => {
   // ④ 輸出預覽
   console.log(`待建立 ${planned.length} 台，略過 ${skipped.length} 台（已存在）`);
   console.log('');
-  console.log('category_key'.padEnd(16) + 'prefix'.padEnd(10) + 'number_format'.padEnd(22) + 'reset');
-  console.log('-'.repeat(64));
+  console.log(
+    'category_key'.padEnd(16) + 'prefix'.padEnd(10) + 'number_format'.padEnd(22) +
+    'current'.padEnd(9) + 'period_tag'.padEnd(12) + 'reset_cycle'
+  );
+  console.log('-'.repeat(84));
   planned.forEach((r) => {
     console.log(
       r.category_key.value.padEnd(16) +
         r.prefix.value.padEnd(10) +
         r.number_format.value.padEnd(22) +
+        r.current.value.padEnd(9) +
+        (r.period_tag.value || '(空)').padEnd(12) +
         r.reset_cycle.value
     );
   });
   console.log('');
+
+  if (oddCodes.length) {
+    console.log(
+      `⚠ 有編號的開頭吻合、但流水號位數與「${pad}」不符，未列入 current 計算，` +
+      `請確認是否為舊制編號：${oddCodes.join('、')}`
+    );
+    console.log('');
+  }
 
   if (planned.length === 0) {
     console.log('沒有需要建立的發號機，結束。');

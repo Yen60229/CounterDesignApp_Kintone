@@ -249,6 +249,15 @@ GET 使用 query string（陣列展開為 `k[]`），非 GET 使用 JSON body（
 - **I9**（子表格模式）：回寫子表格的 PUT 必須送出**所有列並帶上原本的 `id`**。kintone 的子表格為整包覆蓋，
   漏送的列會被刪除、沒帶 id 的列會被當成新列重建。
 - **I7**：`number_format` 留空時必須等價於 `{prefix}{seq}`（向下相容既有資料）。
+- **I11**：`reset_cycle` 的實際選項文字由各 Counter App 自建，不保證是英文常數。
+  外掛的 `getPeriodTag()` 與兩支批量建檔工具的寫入邏輯，一律先經過
+  `RESET_CYCLE_ALIASES` 對照表正規化為 `NONE`/`YEARLY`/`MONTHLY`/`DAILY` 四個內部語意值
+  再判斷／解析，不可直接對欄位原始字面值做字串比對。三處（`desktop.js`／`mobile.js`／
+  兩支批量建檔工具）的對照表內容須保持一致。
+  > 背景：v1.3.0 以前僅認英文常數，若 Counter App 的下拉選項是中文
+  > （如「每年重置」），寫入會被 kintone 拒絕；即使手動塞入中文值，
+  > `getPeriodTag()` 也會落入 `default` 分支（＝視同「不重置」）而不報錯，
+  > 是不易發現的靜默錯誤。v1.3.1 修正。
 
 ---
 

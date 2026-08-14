@@ -16,6 +16,10 @@
  *   外掛會判定成跨週期而把號碼歸零到 1，照樣撞號。
  * ・冪等：已存在相同 (source_app_id, category_key) 的發號機自動略過，
  *   重複執行不會重複建檔，也不會覆蓋既有的 current（不會把號碼歸零）。
+ * ・reset_cycle 欄位若使用中文選項（不重置/每年重置…）也能自動辨識，
+ *   不需要事先知道這台 Counter App 用的是英文常數還是中文選項。
+ * ・建立前先檢查 Counter App 有沒有本工具不知道、卻被設成必填的欄位，
+ *   有的話直接列出來，不必等到寫入失敗才知道原因。
  * ・先預覽再建檔：確認清單無誤才會真的寫入。
  * ・走登入者自身的 session 權限，不需要 API Token。
  *
@@ -64,6 +68,20 @@
 
   // active 欄位（核取方塊）的啟用值，需與 App 設定一致。
   const ACTIVE_VALUE = '啟用';
+
+  // reset_cycle 是各 Counter App 自建的下拉欄位，選項文字由管理者自己決定；
+  // 目前並存兩種寫法：英文常數（NONE/YEARLY/MONTHLY/DAILY，本外掛原始文件的寫法）
+  // 與中文選項（不重置/每年重置/每月重置/每日重置）。
+  // MODE_SPEC 內部一律用英文語意值（不寫死實際要送出的字串），
+  // 實際要寫入 kintone 的值於 resolveResetCycleValue() 依這台 Counter App
+  // 真正的下拉選項動態解析——寫錯字串 kintone 會直接拒絕整批寫入（下拉選單嚴格檢查
+  // 值是否存在於選項清單），這樣就不必事先知道欄位用的是哪種語言。
+  const RESET_CYCLE_ALIASES = {
+    NONE: 'NONE', '不重置': 'NONE',
+    YEARLY: 'YEARLY', '每年重置': 'YEARLY',
+    MONTHLY: 'MONTHLY', '每月重置': 'MONTHLY',
+    DAILY: 'DAILY', '每日重置': 'DAILY',
+  };
 
   /**
    * 各「情境」對應的編號樣式與歸零週期。
@@ -238,6 +256,32 @@
       .map((f) => ({ code: f.code, label: f.label, type: f.type }));
   };
 
+  /**
+   * 讀出 Counter App 的 reset_cycle 欄位「實際可用的選項字串」，
+   * 對照到本工具內部使用的語意值（NONE/YEARLY/MONTHLY/DAILY），
+   * 回傳 { 語意值: 實際選項字串 } 的對照表。
+   *
+   * 找不到欄位、或某個語意值在選項清單中沒有對應項目時，
+   * 直接擲錯列出目前的實際選項，讓使用者知道要在 Counter App 新增哪個選項，
+   * 而不是讓 kintone 用「輸入錯誤」這種看不出原因的訊息擋下整批寫入。
+   */
+  const resolveResetCycleOptions = async () => {
+    const form = await getCounterForm();
+    const field = form.properties && form.properties[F.resetCycle];
+    if (!field || !field.options) {
+      throw new Error(`Counter App 找不到「${F.resetCycle}」欄位，或它不是下拉/單選型別`);
+    }
+
+    const optionValues = Object.keys(field.options);
+    const map = {};
+    optionValues.forEach((v) => {
+      const semantic = RESET_CYCLE_ALIASES[v];
+      if (semantic) map[semantic] = v;
+    });
+
+    return { map, optionValues };
+  };
+
   /** 分頁取回所有記錄（Counter App 台數可能超過單次上限）。 */
   const fetchAll = async (app, query, fields) => {
     const all = [];
@@ -397,6 +441,23 @@
     cfg.hasUniqueKey = await hasUniqueKeyField();
     await checkRequiredFields(cfg);
 
+    // reset_cycle 的實際選項字串由這台 Counter App 自己決定（英文或中文皆可，見上方說明）。
+    // 先確認本次會用到的每個情境都能對應到一個實際選項，找不到就先中止，
+    // 不要等到批次寫入時才被 kintone 用「輸入錯誤」擋下、卻看不出是哪個欄位。
+    const { map: resetCycleMap, optionValues: resetCycleOptions } = await resolveResetCycleOptions();
+    const missingCycles = [...new Set(cfg.modes.map((m) => MODE_SPEC[m] && MODE_SPEC[m].resetCycle))]
+      .filter(Boolean)
+      .filter((semantic) => !resetCycleMap[semantic]);
+    if (missingCycles.length) {
+      throw new Error(
+        `Counter App 的「${F.resetCycle}」欄位選項裡，找不到對應下列週期的選項：` +
+          `${missingCycles.join('、')}\n` +
+          `目前的選項：${resetCycleOptions.join('、') || '（無）'}\n` +
+          '請到欄位設定新增對應選項（例如「每年重置」或英文 YEARLY 皆可），' +
+          '或於本檔調整 RESET_CYCLE_ALIASES 對照表。'
+      );
+    }
+
     // ① 從業務 App 的表單設定取得分組欄位的實際選項
     const form = await api('/k/v1/app/form/fields', 'GET', { app: cfg.sourceApp });
     const field = form.properties && form.properties[cfg.field];
@@ -480,7 +541,8 @@
           [F.prefix]: { value: prefix },
           [F.pad]: { value: cfg.pad },
           [F.numberFormat]: { value: spec.numberFormat },
-          [F.resetCycle]: { value: spec.resetCycle },
+          // 寫入實際存在於這台 Counter App 選項清單裡的字串，而非寫死的英文語意值
+          [F.resetCycle]: { value: resetCycleMap[spec.resetCycle] },
           // 必須設成當期標記，否則外掛第一次發號會判定跨週期而歸零到 1
           [F.periodTag]: { value: periodTag },
           // current 的語意是「已發出的最大號碼」，先 +1 再使用。
@@ -507,7 +569,7 @@
           status: '待建立',
           periodTag,
           numberFormat: spec.numberFormat,
-          resetCycle: spec.resetCycle,
+          resetCycle: resetCycleMap[spec.resetCycle], // 實際寫入的字串，非內部語意值
           found,
           nextCode: `${head}${String(found.max + 1).padStart(Number(cfg.pad), '0')}${tail}`,
         });

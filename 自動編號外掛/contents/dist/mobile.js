@@ -221,13 +221,28 @@
   };
 
   // ── 週期歸零：依重置週期算出當前週期標記 ──
+  //
+  // reset_cycle 是各 Counter App 自建的下拉欄位，選項文字由管理者自己決定；
+  // 目前並存兩種寫法：英文常數（NONE/YEARLY/MONTHLY/DAILY，本外掛原始文件的寫法）
+  // 與中文選項（不重置/每年重置/每月重置/每日重置）。
+  // 若只認英文，中文值會落入 default 分支——不會報錯，但等同被當成「不重置」，
+  // 該歸零卻永久累加，是不會被發現的靜默錯誤，比直接失敗更危險。
+  // 故先正規化再判斷，不論欄位用哪種語言的選項都能正確運作。
+  const RESET_CYCLE_ALIASES = {
+    NONE: 'NONE', '不重置': 'NONE',
+    YEARLY: 'YEARLY', '每年重置': 'YEARLY',
+    MONTHLY: 'MONTHLY', '每月重置': 'MONTHLY',
+    DAILY: 'DAILY', '每日重置': 'DAILY',
+  };
+  const normalizeResetCycle = (raw) => RESET_CYCLE_ALIASES[String(raw || '').trim()] || 'NONE';
+
   const pad2 = (n) => String(n).padStart(2, '0');
   const getPeriodTag = (cycle) => {
     const now = new Date();
     const y = now.getFullYear();
     const m = pad2(now.getMonth() + 1);
     const d = pad2(now.getDate());
-    switch (cycle) {
+    switch (normalizeResetCycle(cycle)) {
       case 'YEARLY':  return `${y}`;
       case 'MONTHLY': return `${y}${m}`;
       case 'DAILY':   return `${y}${m}${d}`;
