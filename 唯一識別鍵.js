@@ -19,8 +19,9 @@
       return event;
     }
 
-    // 依格式 {App ID}_{類別代碼} 組合後寫入唯一識別鍵欄位，例如：685_OVERSEAS
-    record[CONFIG.UNIQUE_FIELD].value = `${appId}_${key}`;
+    // 依格式 {App ID}-{類別代碼} 組合後寫入唯一識別鍵欄位，例如：685-OVERSEAS
+    // 與「發號機批量建檔」的 buildUniqueKey() 格式一致（減號），兩者不可不同。
+    record[CONFIG.UNIQUE_FIELD].value = `${appId}-${key}`;
     return event;
   });
 })();
