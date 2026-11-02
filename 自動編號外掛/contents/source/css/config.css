@@ -293,3 +293,53 @@ html, body { background: #fff; }
 .anum-ss-main { font-size: 14.5px; line-height: 1.5; word-break: break-word; }
 .anum-ss-sub { font-size: 12.5px; color: var(--anum-help); line-height: 1.5; word-break: break-all; }
 .anum-ss-empty { padding: 12px 14px; font-size: 14px; color: var(--anum-help); }
+
+/* ── 號碼組分頁（v1.6.0：一個 App 多組號碼）── */
+.anum-profiles { border-color: var(--anum-accent); box-shadow: 0 0 0 3px var(--anum-accent-soft); }
+.anum-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.anum-tab {
+  padding: 9px 18px; font-size: 15px; font-family: inherit; cursor: pointer;
+  border: 1px solid var(--anum-border-2); border-radius: 999px;
+  background: #fff; color: var(--anum-label);
+  transition: background .12s, border-color .12s, color .12s;
+}
+.anum-tab:hover { background: var(--anum-accent-soft); border-color: var(--anum-accent); }
+.anum-tab.is-active { background: var(--anum-accent); border-color: var(--anum-accent); color: #fff; font-weight: 600; }
+.anum-tab-add { border-style: dashed; color: var(--anum-accent); }
+.anum-tab-actions {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--anum-border);
+  font-size: 14px; color: var(--anum-help);
+}
+.anum-btn-danger { color: var(--anum-danger); border-color: #edc4bf; }
+.anum-btn-danger:hover { background: #fbecea; border-color: var(--anum-danger); }
+
+/* ── 設定複製／貼上對話框 ── */
+.anum-ok { color: #2f7d4f; font-size: 14px; font-weight: 500; }
+.anum-dlg-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(16, 24, 40, .45);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.anum-dlg {
+  width: 100%; max-width: 720px; max-height: 90vh; overflow: auto; box-sizing: border-box;
+  background: #fff; border-radius: 12px; padding: 24px 26px 22px;
+  box-shadow: 0 12px 40px rgba(16, 24, 40, .25);
+  font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", -apple-system, "Segoe UI", sans-serif;
+  color: var(--anum-text); line-height: 1.7;
+}
+.anum-dlg-title { margin: 0 0 10px; font-size: 19px; font-weight: 700; }
+.anum-dlg-help { margin: 0 0 8px; font-size: 14px; color: var(--anum-help); }
+.anum-dlg-help.is-warn {
+  padding: 8px 12px; background: var(--anum-warn-bg); border: 1px solid var(--anum-warn-border);
+  border-radius: 7px; color: var(--anum-warn-text);
+}
+.anum-dlg-text {
+  width: 100%; box-sizing: border-box; margin-top: 6px;
+  font-family: Consolas, "Courier New", monospace; font-size: 12.5px; line-height: 1.5;
+  border: 1px solid var(--anum-border-2); border-radius: 7px; padding: 10px 12px;
+  background: var(--anum-bg-soft); resize: vertical;
+}
+.anum-dlg-status { min-height: 22px; margin-top: 8px; }
+.anum-dlg-status.is-ok { color: #2f7d4f; font-size: 14px; font-weight: 500; }
+.anum-dlg-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 12px; }

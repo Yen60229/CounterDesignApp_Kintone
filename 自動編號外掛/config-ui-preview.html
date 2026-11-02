@@ -25,31 +25,82 @@
 
 <script>
 // ── 模擬 kintone 環境 ──
-const SAVED = {
-  version: '1.0', counterApp: '100',
-  counterToken: '', selfToken: '',
-  hasCounterToken: true, hasSelfToken: false,
-  numberField: '事故編號', categoryField: '事故分類',
-  activeQuery: 'active in ("啟用")',
-  triggers: ['edit.submit'],
-  statusCond: '*', toStatus: '*', actionName: '*',
-  confirmMessage: '*', maxRetry: 5,
+// 預設模擬 v1.6.0 多組設定（事故編號＋東亞貨物編號）；網址加 ?legacy=1 改模擬 v1.5.0 的舊版平面設定，
+// 用來檢查「舊設定讀進來會自動變成第 1 組」。
+const ACCIDENT_PROFILE = {
+  numberLabel: '', numberField: '事故編號', categoryField: '事故分類',
+  target: 'field', subtableCode: '',
+  triggers: ['process.proceed'],
+  statusCond: '*', toStatus: '文件確認', actionName: '*', confirmMessage: '*',
   categories: [
     { match: '物損事故(貨物)',       counterKey: 'CA', mode: 'issue', copyField: '', validate: '' },
     { match: '物損事故(設施或其他)', counterKey: 'CA', mode: 'issue', copyField: '', validate: '' },
     { match: '搬家行李事故',         counterKey: 'HA', mode: 'issue', copyField: '', validate: '' },
     { match: '其他事故',             counterKey: 'OA', mode: 'issue', copyField: '', validate: '' },
-    { match: '國內供應商',           counterKey: '',   mode: 'copy',  copyField: '統一編號', validate: 'taxId8' },
   ],
   codeMaps: [
     { token: 'level', field: '事故級別', pairs: [{ from: '一般事故', to: 'G' }, { from: '重大事故', to: 'M' }] },
   ],
 };
+const TOA_PROFILE = {
+  numberLabel: '', numberField: '東亞貨物編號', categoryField: '通報編號',
+  target: 'field', subtableCode: '',
+  triggers: ['create.submit', 'edit.submit'],
+  statusCond: '*', toStatus: '*', actionName: '*', confirmMessage: '*',
+  categories: [{ match: '通報物損編號', counterKey: 'TOA_CA', mode: 'issue', copyField: '', validate: '' }],
+  codeMaps: [],
+};
+const SHARED = {
+  counterApp: '715', counterToken: '', selfToken: '',
+  hasCounterToken: true, hasSelfToken: false,
+  activeQuery: 'active in ("啟用")', maxRetry: 5,
+};
+const SAVED = /[?&]legacy=1/.test(location.search)
+  ? Object.assign({ version: '1.0' }, SHARED, ACCIDENT_PROFILE)
+  : Object.assign({ version: '2.0' }, SHARED, { profiles: [ACCIDENT_PROFILE, TOA_PROFILE] });
+
+// 模擬表單結構：含表單本體欄位 + 一個子表格（用來驗證逐列給號的三個選單）
+const FORM_FIELDS = {
+  properties: {
+    '事故編號':   { code: '事故編號', label: '事故編號', type: 'SINGLE_LINE_TEXT' },
+    '事故分類':   { code: '事故分類', label: '事故分類', type: 'DROP_DOWN' },
+    '事故級別':   { code: '事故級別', label: '事故級別', type: 'RADIO_BUTTON' },
+    '通報編號':   { code: '通報編號', label: '通報編號', type: 'DROP_DOWN' },
+    '東亞貨物編號': { code: '東亞貨物編號', label: '東亞貨物編號', type: 'SINGLE_LINE_TEXT' },
+    '統一編號':   { code: '統一編號', label: '統一編號', type: 'SINGLE_LINE_TEXT' },
+    '客戶名稱':   { code: '客戶名稱', label: '客戶名稱', type: 'SINGLE_LINE_TEXT' },
+    '申請日期':   { code: '申請日期', label: '申請日期', type: 'DATE' },
+    'accident_place': { code: 'accident_place', label: '發生地點詳細地址與周邊環境描述', type: 'MULTI_LINE_TEXT' },
+    '設備明細': {
+      code: '設備明細', label: '設備明細表', type: 'SUBTABLE',
+      fields: {
+        '設備代號':   { code: '設備代號', label: '設備代號', type: 'SINGLE_LINE_TEXT' },
+        '設備種類':   { code: '設備種類', label: '設備種類', type: 'DROP_DOWN' },
+        '設備需求':   { code: '設備需求', label: '設備需求', type: 'DROP_DOWN' },
+        '數量':       { code: '數量', label: '數量', type: 'NUMBER' },
+        'item_note':  { code: 'item_note', label: '這一列的備註說明文字', type: 'MULTI_LINE_TEXT' },
+      },
+    },
+    '費用明細': {
+      code: '費用明細', label: '費用明細表', type: 'SUBTABLE',
+      fields: {
+        '費用項目': { code: '費用項目', label: '費用項目', type: 'SINGLE_LINE_TEXT' },
+        '金額':     { code: '金額', label: '金額', type: 'NUMBER' },
+      },
+    },
+  },
+};
 
 window.kintone = {
   $PLUGIN_ID: 'preview',
   app: { getId: () => 123 },
-  api: { url: (p) => 'https://example.cybozu.com' + p },
+  api: Object.assign(
+    (url, method, params) => {
+      if (String(url).indexOf('/form/fields.json') !== -1) return Promise.resolve(FORM_FIELDS);
+      return Promise.reject(new Error('預覽環境未模擬此 API：' + url));
+    },
+    { url: (p) => 'https://example.cybozu.com' + p }
+  ),
   plugin: { app: {
     getConfig: () => ({ data: JSON.stringify(SAVED) }),
     getProxyConfig: () => null,

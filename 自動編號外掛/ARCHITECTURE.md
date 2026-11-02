@@ -48,34 +48,53 @@ npx @kintone/plugin-packer contents --ppk auto-numbering.ppk --out plugin.zip
 
 以 `JSON.stringify` 序列化後存於 `data` 鍵。**Token 一律不以明文存於此處**（`counterToken` / `selfToken` 存好即被清空，只留 `hasCounterToken` / `hasSelfToken` 旗標）；Token 明文另存於外掛代理設定，見 §3.2。資料結構（Schema）如下：
 
+v1.6.0 起分成兩層：**共用設定**（計數器連線，整個外掛一份）與 **號碼組 `profiles[]`**（一張表單有幾個號碼就幾組，例：事故編號＋東亞貨物編號）。一個 App 只能加一次本外掛，所以多個號碼以多組承載。
+
 ```jsonc
 {
-  "version": "1.0",
+  "version": "2.0",
+  // ── 共用 ──
   "counterApp": "100",            // Counter App ID（字串）
   "counterToken": "",             // 一律為空字串：Token 已搬至加密代理設定（§3.2），此欄只保留相容性
   "hasCounterToken": true,        // 非機密旗標：Counter App 是否已設定 Token（決定要不要走代理）
   "selfToken": "",                // 一律為空字串：Token 已搬至加密代理設定（§3.2）
   "hasSelfToken": false,          // 非機密旗標：本 App 是否已設定 Token
-  "numberField": "供應商編號",     // 寫入目標欄位代碼
-  "categoryField": "供應商分類",   // 決定套用規則的欄位代碼
   "activeQuery": "active in (\"啟用\")", // Counter App 啟用條件（對應其 active 欄位實際值）
-  "triggers": ["create.submit", "edit.submit", "process.proceed"], // 可複選
-  "statusCond": "*",              // edit.submit 限定狀態；* 表示任意
-  "toStatus": "*",                // process.proceed 的到達狀態；* 表示任意
-  "actionName": "*",              // process.proceed 的動作名稱；* 表示任意
-  "confirmMessage": "…",          // 儲存前確認訊息文字
-  "maxRetry": 5,                  // revision 衝突重試上限
-  "categories": [                 // 分類規則陣列（順序即比對優先序，取首個符合者）
-    // counterKey：Counter App 的 category_key；留空＝沿用 match。多列填相同值即共用同一台計數器
-    { "match": "境外供應商", "counterKey": "", "mode": "issue", "copyField": "", "validate": "" },
-    { "match": "國內供應商", "counterKey": "", "mode": "copy",  "copyField": "統一編號", "validate": "taxId8" }
+  "maxRetry": 5,                  // revision 衝突重試上限（各組共用）
+  // ── 號碼組：依陣列順序處理 ──
+  "profiles": [
+    {
+      "numberLabel": "供應商編號",   // 給使用者看的號碼名稱（訊息用）
+      "numberField": "供應商編號",   // 寫入目標欄位代碼（各組不可重複）
+      "categoryField": "供應商分類", // 決定套用規則的欄位代碼
+      "target": "field",            // field：一張單一號／subtable：表格每列一號
+      "subtableCode": "",           // target=subtable 時的表格欄位代碼
+      "triggers": ["create.submit", "edit.submit", "process.proceed"], // 可複選
+      "statusCond": "*",            // edit.submit 限定狀態；* 表示任意
+      "toStatus": "*",              // process.proceed 的到達狀態；* 表示任意
+      "actionName": "*",            // process.proceed 的動作名稱；* 表示任意
+      "confirmMessage": "…",        // 儲存前確認訊息文字；* 表示不詢問
+      "categories": [               // 分類規則陣列（先精確比對，找不到才用 match="*"）
+        // counterKey：Counter App 的 category_key；留空＝沿用 match。多列填相同值即共用同一台計數器
+        { "match": "境外供應商", "counterKey": "", "mode": "issue", "copyField": "", "validate": "" },
+        { "match": "國內供應商", "counterKey": "", "mode": "copy",  "copyField": "統一編號", "validate": "taxId8" }
+      ],
+      "codeMaps": [                 // 代碼對照表（選用）：欄位值 → 代碼，供 number_format 的自訂 token 使用
+        { "token": "level", "field": "事故級別",
+          "pairs": [ { "from": "一般事故", "to": "G" }, { "from": "重大事故", "to": "M" } ] }
+      ]
+    }
   ],
-  "codeMaps": [                   // 代碼對照表（選用）：欄位值 → 代碼，供 number_format 的自訂 token 使用
-    { "token": "level", "field": "事故級別",
-      "pairs": [ { "from": "一般事故", "to": "G" }, { "from": "重大事故", "to": "M" } ] }
-  ]
+  // ── 第 1 組的平面鏡像（降版相容）──
+  // 存檔時把 profiles[0] 的欄位另寫一份在頂層。v1.6.0 只讀 profiles、忽略這些欄位；
+  // 萬一外掛退回 v1.5.0 以前，舊程式讀頂層欄位，第 1 組仍可照常發號（第 2 組以後則不會動作）。
+  "numberField": "供應商編號", "categoryField": "供應商分類" /* …其餘 profile 欄位同上… */
 }
 ```
+
+> **舊版設定遷移**：v1.5.0 以前的設定沒有 `profiles`（平面欄位、只有一組）。`desktop.js` 讀到這種設定時視為「只有一組」照常運作；`config.js` 開啟時自動轉成第 1 組，按一次「儲存設定」即改存為 v2.0 格式。管理者不需要重新設定。
+
+> **跨組檢查**（`config.js` 存檔前）：(1) 兩組不可寫入同一個欄位；(2) 兩組不可使用相同的固定計數器代碼——兩種號碼搶同一串流水號、且樣式相同，幾乎一定是設定錯誤（例：事故編號與東亞貨物編號都填 `CA`，應改為 `TOA_CA`）。同一組內多個分類共用代碼是正常用法，不檢查。
 
 > **舊版相容**：更新程式後、管理者尚未重新於設定畫面按「儲存」前，設定檔仍可能帶有 §5.5 所述的舊版明文 `counterToken` / `selfToken`。此時 `apiWithToken` 會沿用舊的 `fetch` 直送路徑，功能不受影響；管理者一按「儲存」，Token 即自動搬入加密代理設定，此後 `counterToken` / `selfToken` 恆為空字串。
 
@@ -163,7 +182,17 @@ Counter App 的 36 筆發號機可用 `tools/seed-counters.mjs` 批量建檔（�
 
 - 內建 token **先**代換完畢，因此自訂名稱不會覆蓋內建行為；設定畫面亦禁止使用內建名稱。
 - 僅當樣板**實際出現** `{token}` 時才檢查該 token，避免其他計數器的樣式被無關設定牽連。
-- 若樣板用到該 token，但記錄的欄位值在對照表中查無代碼（含欄位為空），**直接擲錯中止發號**，不產生 `2026001--CA` 這類殘缺號碼。此時計數器已完成 +1，該號碼會被跳過——寧可跳號，也不寫入錯誤格式。
+- 若樣板用到該 token，但記錄的欄位值在對照表中查無代碼（含欄位為空），**直接擲錯中止發號**，不產生 `2026001--CA` 這類殘缺號碼。此檢查發生在推進計數器之前（見 §5 先試組、再推進），不會跳號。
+
+**對照比對（v1.6.1，`matchCodePair`）**：`pairs[].from` 支援三種寫法，優先序固定、與填寫順序無關：
+
+1. 完全相同（`一般事故`）
+2. 開頭相符（`事業本部*`），多條符合取 `*` 前字串最長者
+3. 其餘任意值（`*`），僅在值非空時適用
+
+欄位值先經 `valuesOf()` 轉成候選字串陣列：一般欄位為單一字串；組織／使用者／群組選擇（`[{code,name}]`）與建立人等物件值取 `name` 並附上 `code`；核取方塊／複選取各選項。多個候選時先比完所有候選的「完全相同」，才比「開頭相符」。顯示用（錯誤訊息、分類比對、`{欄位}` 樣板、抄錄）則用 `textOf()`：物件取 `name`、陣列以逗號串接——與舊版 `String(陣列)` 對基本型別陣列的結果相同，既有分類值不受影響。
+
+> v1.6.1 以前一律 `String(field.value)`，組織選擇等欄位會變成 `[object Object]`，對照表與分類比對都無法使用。
 
 > **與 `counterKey` 的分工**：`counterKey` 決定「用哪一台計數器」（影響序號分組），`codeMaps` 決定「號碼字串裡的可變代碼」（不影響序號分組）。兩者正交，可各自獨立使用。
 
@@ -172,28 +201,34 @@ Counter App 的 36 筆發號機可用 `tools/seed-counters.mjs` 批量建檔（�
 ## 5. 執行流程（`desktop.js`）
 
 ### 5.1 啟動
-讀取 plugin config → 解析 → 計算常數。`ENABLED = counterApp && numberField && categoryField && categories.length`，任一缺漏則整個外掛靜默不動作。
+讀取 plugin config → 取出 `profiles`（舊版平面設定視為一組）→ 每組以 `makeProfile(P)` 建立各自的閉包（欄位、規則、發號函式）。單組的 `ENABLED = counterApp && numberField && categoryField && categories.length`，缺漏的組會被略過；一組都沒有時不註冊任何事件。
+
+**每個事件只註冊一個 handler**，在裡面依設定順序逐組處理。不讓各組自行註冊——kintone 同一事件的多個 async handler 會並行觸發，會疊出多個確認／結果視窗，也可能同時回寫同一筆記錄。
 
 ### 5.2 觸發情境 A：儲存（create / edit）— **兩段式**
 > 採「儲存成功後才發號」可避免使用者取消或驗證失敗造成跳號。代價為額外一次回寫 PUT。
 
 ```
 app.record.{create|edit}.submit          → onSubmit
-  ├ 已有編號 / 分類無規則 / 狀態不符 → 放行，不發號
-  ├ 跳出確認訊息；取消 → event.error 擋下儲存
-  └ 通過 → 設定旗標 _pendingIssue = true
+  ├ 逐組判斷 dueOnSubmit：已有編號 / 分類無規則 / 狀態不符 → 該組不發號
+  ├ 沒有任何一組要發號 → 放行
+  ├ 跳出確認訊息（多組只問一次，訊息去重合併；全為 * 則不問）；取消 → event.error 擋下儲存
+  └ 通過 → _pending = 要發號的組
 app.record.{create|edit}.submit.success  → onSubmitSuccess
-  └ 若 _pendingIssue 為真 → resolveSerial() 取號 → PUT 回寫 numberField
-     → 成功提示 → 轉址 /k/{appId}/show#record={id} 顯示新編號
+  └ 對 _pending 逐組依序 issueOnSaved()：取號 → PUT 回寫該組的 numberField
+     （某組失敗不影響其他組；子表格組會重讀記錄，看得到前一組的回寫）
+     → 結果彙整成一個視窗（單組時訊息與 v1.5.0 相同）
 ```
-> 注意：`_pendingIssue` 為**模組級單一布林值**，跨「桌面/行動」與多個事件共用。單頁單次儲存無虞，但屬潛在的狀態耦合點（詳見 §9）。
+> 注意：`_pending` 為**模組級單一陣列**，跨「桌面/行動」與多個事件共用。單頁單次儲存無虞，但屬潛在的狀態耦合點（詳見 §9）。
 
 ### 5.3 觸發情境 B：流程推進（process.proceed）— **單段原子**
-`detail.process.proceed` **沒有 success 事件**，因此發號後直接寫入 `event.record[numberField]`，隨流程推進一併原子儲存（不另發 PUT）。發號失敗則以 `event.error` 擋下推進。
+`detail.process.proceed` **沒有 success 事件**，因此逐組 `issueIntoRecord()` 發號後直接寫入 `event.record[numberField]`，隨流程推進一併原子儲存（不另發 PUT）。**任一組失敗即以 `event.error` 擋下推進**，避免只存到一半的號碼。
 
 ### 5.4 發號引擎 `issueSerial(categoryKey, codes)`（核心）
 
 `categoryKey` 由 `resolveSerial` 決定：取分類規則的 `counterKey`，留空則沿用 `match`（向下相容）；若 `counterKey` 含 `{欄位代碼}`，先經 `resolveKeyTemplate` 依當筆記錄解析（見 §3.3）。因此多個分類值可指向同一 `categoryKey`、共用一台計數器，序號連續不重號。`codes` 為 `resolveCodeTokens(record)` 的產物（見 §4.1）。
+
+> **先試組、再推進計數器**（v1.6.0）：`reserveRange` 讀到計數器記錄後，會先用它的 `number_format` 與這次的 `codes` 試組一次號碼，才送出 revision PUT。代碼對照表查無代碼（例：事故級別填了對照表沒有的值）時就在這裡中止，計數器的 `current` 不會被推進，不會跳號。
 
 查詢前會將 `categoryKey` 中的 `"` 跳脫，避免解析出的值破壞 kintone 查詢語法。
 
@@ -223,8 +258,11 @@ GET 使用 query string（陣列展開為 `k[]`），非 GET 使用 JSON body（
 
 ## 6. 錯誤處理
 
-- `guard(fn)`：包覆每個事件處理函式，捕捉例外；於 submit / process 類事件寫入 `event.error` 以擋下操作。
-- `friendlyError`：`CB_AU01` → 顯示登入逾時提示；`GAIA_NO01／NO02／CB_NO01／CB_NO02／GAIA_DA02` → 顯示權限不足提示；其餘維持原文。
+- `guard(fn)`：包覆每個事件處理函式，捕捉例外；於 submit / process 類事件呼叫 `blockEvent` 擋下操作。
+- `blockEvent(event, title, message)`（v1.7.1）：有 `window.Swal` 時 `event.error` 只放短句 `NATIVE_BLOCK_TEXT`（「發生錯誤，原因請見訊息視窗」），完整原因以 `uiToast('error', …)` 顯示；沒有 Swal 時 `event.error` 直接放完整原因。**新增擋下路徑時一律呼叫 `blockEvent`，不要直接寫長句到 `event.error`**。唯一例外是使用者在確認視窗按取消（短句「已取消儲存」／「已取消，未推進流程」，不另跳視窗）。
+- 訊息視窗（`uiConfirm`／`uiToast`）的內文用 `.anum-swal-nowrap`（`white-space: pre`）：不自動折行、只在原文換行處換行，`width: 'auto'` 讓視窗寬度跟著文字走，上限 92vw。
+- `errorText`：`CB_AU01` → 顯示登入逾時提示；`GAIA_NO01／NO02／CB_NO01／CB_NO02／GAIA_DA02` → 顯示權限不足提示；其餘維持原文。`friendlyError(err, prefix)` 為其加上「產生X時發生問題：」前綴的版本，供 submit.success 結果彙整使用。
+- 欄位名稱（v1.7.1）：`loadFieldLabels()` 讀 `/k/v1/app/form/fields.json`（操作者 session，含子表格內欄位）建立「欄位代碼 → 欄位名稱」快取；啟動時先觸發一次，`onSubmit`／`onProceed` 判斷前會 `await` 確保已載入。所有給使用者看的訊息以 `fieldLabel(code)` 顯示欄位名稱，讀取失敗時退回欄位代碼。
 - `errorCodeOf`：優先讀取 `err.code`，再以正則表達式從訊息中擷取 `CB_*` / `GAIA_*` 代碼。
 - 介面：環境具備 `window.Swal`（SweetAlert2）時使用之，否則退回瀏覽器原生 `confirm` / `alert`。
 
