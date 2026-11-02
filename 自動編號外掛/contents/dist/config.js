@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const UI_VERSION = '1.7.1';
+  const UI_VERSION = '1.7.2';
   const PLUGIN_ID = kintone.$PLUGIN_ID;
   const APP_ID = kintone.app.getId();
 
@@ -265,13 +265,9 @@
     SUBTABLE: '子表格', CATEGORY: '分類',
   };
 
-  // 完成提示：外掛設定頁載得到 SweetAlert2 就用它（含動畫），否則退回原生 alert。
-  // 設定頁不套用 App 的 JavaScript 自訂，故不保證 Swal 一定存在，必須留退路。
-  const uiDone = (title, html) => {
-    if (!window.Swal) {
-      window.alert(`${title}\n\n${String(html).replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')}`);
-      return Promise.resolve();
-    }
+  // 提示／確認視窗一律用 SweetAlert2：外掛自帶一份（3rd_parties/sweetalert2.all.min.js），
+  // 設定頁不套用 App 的 JavaScript 自訂也一定有 Swal。原生 alert / confirm 只是 Swal 載入失敗時的最後備案。
+  const ensureCfgSwalStyle = () => {
     if (!document.getElementById('anum-cfg-swal-style')) {
       const st = document.createElement('style');
       st.id = 'anum-cfg-swal-style';
@@ -283,9 +279,20 @@
         .anum-cfg-popup { border-radius: 12px; padding: 26px 30px 28px; }
         .anum-cfg-title { font-size: 21px !important; font-weight: 700 !important; }
         .anum-cfg-text  { font-size: 16px !important; line-height: 1.75 !important; color: #33404e !important; }
+        .anum-cfg-nowrap { white-space: pre !important; overflow-x: auto; }
+        /* 「貼上設定」等自訂對話框（.anum-dlg-backdrop z-index 10000）開著時，視窗要疊在它上面 */
+        .anum-cfg-container { z-index: 10100 !important; }
       `;
       document.head.appendChild(st);
     }
+  };
+
+  const uiDone = (title, html) => {
+    if (!window.Swal) {
+      window.alert(`${title}\n\n${String(html).replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')}`);
+      return Promise.resolve();
+    }
+    ensureCfgSwalStyle();
     return window.Swal.fire({
       icon: 'success',
       title,
@@ -294,11 +301,37 @@
       confirmButtonText: '好，我知道了',
       confirmButtonColor: '#2563a8',
       customClass: {
+        container: 'anum-cfg-container',
         popup: 'anum-cfg-popup', title: 'anum-cfg-title', htmlContainer: 'anum-cfg-text',
       },
       showClass: { popup: 'anum-cfg-in' },
       hideClass: { popup: 'anum-cfg-out' },
     });
+  };
+
+  const uiAsk = async (title, text, confirmText) => {
+    if (!window.Swal) return window.confirm(`${title}\n\n${text}`);
+    ensureCfgSwalStyle();
+    const res = await window.Swal.fire({
+      icon: 'warning',
+      title,
+      text,
+      width: 'auto',
+      showCancelButton: true,
+      confirmButtonText: confirmText || '確定',
+      cancelButtonText: '取消',
+      confirmButtonColor: '#c0392b',
+      cancelButtonColor: '#8a94a3',
+      reverseButtons: true,
+      focusCancel: true,
+      customClass: {
+        container: 'anum-cfg-container',
+        popup: 'anum-cfg-popup', title: 'anum-cfg-title', htmlContainer: 'anum-cfg-text anum-cfg-nowrap',
+      },
+      showClass: { popup: 'anum-cfg-in' },
+      hideClass: { popup: 'anum-cfg-out' },
+    });
+    return res.isConfirmed;
   };
 
   const NONE_OPT = { v: '', l: '（尚未選擇）' };
@@ -511,8 +544,13 @@
       bar.appendChild(el('span', {}, [`目前編輯：第 ${activeIdx + 1} 組「${profileName(prof(), activeIdx)}」`]));
       bar.appendChild(el('button', {
         class: 'anum-btn anum-btn-danger',
-        onclick: () => {
-          if (!window.confirm(`確定要刪除第 ${activeIdx + 1} 組「${profileName(prof(), activeIdx)}」嗎？\n（按「儲存設定」後才會真正生效）`)) return;
+        onclick: async () => {
+          const ok = await uiAsk(
+            '刪除號碼組',
+            `確定要刪除第 ${activeIdx + 1} 組「${profileName(prof(), activeIdx)}」嗎？\n（按「儲存設定」後才會真正生效）`,
+            '刪除'
+          );
+          if (!ok) return;
           state.profiles.splice(activeIdx, 1);
           activeIdx = Math.max(0, activeIdx - 1);
           render();
@@ -878,7 +916,7 @@
     });
     const status = el('div', { class: 'anum-dlg-status' });
 
-    const apply = (mode, close) => {
+    const apply = async (mode, close) => {
       let data;
       try { data = parseImport(ta.value); } catch (e) {
         status.className = 'anum-dlg-status anum-error';
@@ -886,7 +924,12 @@
         return;
       }
       if (mode === 'replace') {
-        if (!window.confirm(`確定要用貼上的 ${data.profiles.length} 組號碼取代目前全部的設定嗎？\n（按「儲存設定」後才會真正生效，API Token 會保留原本的）`)) return;
+        const ok = await uiAsk(
+          '取代目前設定',
+          `確定要用貼上的 ${data.profiles.length} 組號碼取代目前全部的設定嗎？\n（按「儲存設定」後才會真正生效，API Token 會保留原本的）`,
+          '取代'
+        );
+        if (!ok) return;
         if (data.counterApp !== undefined) state.counterApp = data.counterApp;
         if (data.activeQuery !== undefined) state.activeQuery = data.activeQuery;
         if (data.maxRetry !== undefined) state.maxRetry = data.maxRetry;

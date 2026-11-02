@@ -180,7 +180,8 @@
     return kintone.api(kintone.api.url(path, true), method, body);
   };
 
-  // ── UI 訊息（有 SweetAlert2 用 Swal，否則退回原生 confirm/alert）──
+  // ── UI 訊息：一律用 SweetAlert2（外掛自帶 3rd_parties/sweetalert2.all.min.js；App 已自行載入 Swal 時沿用它）。
+  // 原生 confirm/alert 只是 Swal 載入失敗時的最後備案，確保訊息不會整個消失。──
   // 字級/間距特別放大，對象鎖定 35–55 歲使用者：優先求「一眼看清楚」而非精緻小巧。
   const injectSwalStyle = (() => {
     let done = false;

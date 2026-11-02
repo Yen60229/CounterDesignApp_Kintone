@@ -29,6 +29,7 @@
 | `contents/source/html/config.html` | 設定畫面容器（僅一個 `#ui-section`） | 幾乎不需變動 |
 | `contents/source/css/config.css` | 設定畫面樣式 | 調整外觀 |
 | `contents/3rd_parties/kintone-config-helper.js` | 第三方套件：取得業務 App 欄位清單供下拉選擇 | 不需變動 |
+| `contents/3rd_parties/sweetalert2.all.min.js` | 第三方套件：SweetAlert2 v11.14.5（外包 `if (!window.Swal)` 判斷），執行期與設定頁的所有視窗 | 升級 SweetAlert2 時 |
 | `auto-numbering.ppk` / `.pub` | 打包用金鑰對。**決定 plugin ID，務必妥善保管、勿外流** | 不需變動 |
 | `plugin.zip` | 打包產物 | 由打包指令重新產生 |
 | `tools/seed-counters.mjs` | Counter App 發號機**批量建檔**工具（Node，零相依）。讀業務 App 表單設定列舉選項，冪等、預設 dry-run | 新增分組欄位或情境時 |
@@ -264,7 +265,7 @@ GET 使用 query string（陣列展開為 `k[]`），非 GET 使用 JSON body（
 - `errorText`：`CB_AU01` → 顯示登入逾時提示；`GAIA_NO01／NO02／CB_NO01／CB_NO02／GAIA_DA02` → 顯示權限不足提示；其餘維持原文。`friendlyError(err, prefix)` 為其加上「產生X時發生問題：」前綴的版本，供 submit.success 結果彙整使用。
 - 欄位名稱（v1.7.1）：`loadFieldLabels()` 讀 `/k/v1/app/form/fields.json`（操作者 session，含子表格內欄位）建立「欄位代碼 → 欄位名稱」快取；啟動時先觸發一次，`onSubmit`／`onProceed` 判斷前會 `await` 確保已載入。所有給使用者看的訊息以 `fieldLabel(code)` 顯示欄位名稱，讀取失敗時退回欄位代碼。
 - `errorCodeOf`：優先讀取 `err.code`，再以正則表達式從訊息中擷取 `CB_*` / `GAIA_*` 代碼。
-- 介面：環境具備 `window.Swal`（SweetAlert2）時使用之，否則退回瀏覽器原生 `confirm` / `alert`。
+- 介面（v1.7.2）：所有提示／確認一律用 SweetAlert2。外掛自帶 `3rd_parties/sweetalert2.all.min.js`（v11.14.5，`manifest.json` 的 desktop／mobile／config 三個 js 陣列都排在主程式之前），檔案外層包 `if (!window.Swal) { … }`：App 已自行載入 Swal 時沿用 App 的版本、不覆蓋。原生 `confirm` / `alert` 只保留為 Swal 載入失敗時的最後備案。設定頁的確認用 `uiAsk()`，視窗容器 `.anum-cfg-container` 的 z-index 墊到 10100，疊在「貼上設定」對話框（10000）之上。升級 SweetAlert2 時，把新版 `dist/sweetalert2.all.min.js` 一樣包上這層判斷再放進來。
 
 ---
 

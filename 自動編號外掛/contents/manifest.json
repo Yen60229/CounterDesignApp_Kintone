@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "version": "1.7.1",
+  "version": "1.7.2",
   "type": "APP",
   "name": {
     "ja": "自動採番プラグイン（SYS-07-2）",
@@ -22,14 +22,14 @@
   },
   "icon": "source/image/icon.png",
   "desktop": {
-    "js": ["dist/desktop.js"]
+    "js": ["3rd_parties/sweetalert2.all.min.js", "dist/desktop.js"]
   },
   "mobile": {
-    "js": ["dist/mobile.js"]
+    "js": ["3rd_parties/sweetalert2.all.min.js", "dist/mobile.js"]
   },
   "config": {
     "html": "source/html/config.html",
-    "js": ["3rd_parties/kintone-config-helper.js", "dist/config.js"],
+    "js": ["3rd_parties/kintone-config-helper.js", "3rd_parties/sweetalert2.all.min.js", "dist/config.js"],
     "css": ["source/css/config.css"],
     "required_params": []
   }
